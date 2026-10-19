@@ -2,7 +2,7 @@
  * TableView – orchestrator for the Table (host) device.
  * Subscribes to HostController public state and renders the correct phase screen.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { HostController } from '../../net/host';
 import type { GameRules } from '../../engine/types';
@@ -12,12 +12,17 @@ import { TableLobby } from './TableLobby';
 import { TableGameplay } from './TableGameplay';
 import { TableRoundSummary } from './TableRoundSummary';
 import { TableLeaderboard } from './TableLeaderboard';
+import { buildJoinUrl } from '../../net/roomCode';
 
 interface TableViewProps {
   hostController: HostController;
+  /** Link encoded in the QR code. Defaults to this page's origin. */
+  joinUrl?: string;
+  /** Extra hints shown under the QR code in the lobby (e.g. LAN address). */
+  lobbyNotice?: ReactNode;
 }
 
-export function TableView({ hostController }: TableViewProps) {
+export function TableView({ hostController, joinUrl, lobbyNotice }: TableViewProps) {
   const [state, setState] = useState<PublicGameState>(() => hostController.buildPublicState());
 
   useEffect(() => {
@@ -38,6 +43,8 @@ export function TableView({ hostController }: TableViewProps) {
             <PhaseWrapper key="lobby">
               <TableLobby
                 state={state}
+                joinUrl={joinUrl ?? buildJoinUrl(window.location.origin, state.roomCode)}
+                notice={lobbyNotice}
                 onUpdateRules={(patch: Partial<GameRules>) => hostController.setRules(patch)}
                 onStartGame={() => hostController.startGame()}
               />

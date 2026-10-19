@@ -101,7 +101,7 @@ export function DevSimulator() {
             >
               <PlayerView
                 transport={transports.current[i]}
-                autoJoin={{ name }}
+                name={name}
                 seatLabel={`Seat ${i + 1}`}
               />
             </div>

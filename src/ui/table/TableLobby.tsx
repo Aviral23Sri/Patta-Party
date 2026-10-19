@@ -1,6 +1,7 @@
 /**
  * TableLobby – shown on the Table device while waiting for players to join.
  */
+import { useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import type { GameRules } from '../../engine/types';
@@ -8,6 +9,9 @@ import type { PublicGameState } from '../../net/transport';
 
 interface TableLobbyProps {
   state: PublicGameState;
+  /** Link encoded in the QR and shown for copy/paste. */
+  joinUrl: string;
+  notice?: ReactNode;
   onUpdateRules: (patch: Partial<GameRules>) => void;
   onStartGame: () => void;
 }
@@ -21,16 +25,17 @@ const SEAT_COLORS = [
 
 const SEAT_DOT = ['bg-blue-400', 'bg-purple-400', 'bg-rose-400', 'bg-amber-400'];
 
-export function TableLobby({ state, onUpdateRules, onStartGame }: TableLobbyProps) {
+export function TableLobby({ state, joinUrl, notice, onUpdateRules, onStartGame }: TableLobbyProps) {
   const filledCount = state.seats.filter(Boolean).length;
-  const allFilled = filledCount === 4;
-  const joinUrl = `${window.location.origin}/?room=${state.roomCode}`;
+  const allConnected = state.seats.every((s) => s?.connected);
+  const allFilled = filledCount === 4 && allConnected;
   const rules = state.rules;
 
   return (
     <div className="flex h-full overflow-hidden">
-      {/* Left: Room code + QR + Seats */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
+      {/* Left: Room code + QR + Seats (scrolls on short screens) */}
+      <div className="flex-1 min-w-0 overflow-y-auto">
+      <div className="flex flex-col min-h-full items-center justify-center gap-5 px-6 py-6">
         {/* Title */}
         <div className="text-center">
           <h1 className="text-4xl font-bold text-white" style={{ fontFamily: "'Playfair Display', serif" }}>
@@ -50,9 +55,19 @@ export function TableLobby({ state, onUpdateRules, onStartGame }: TableLobbyProp
           <QRCodeSVG value={joinUrl} size={140} level="M" />
         </div>
 
-        <p className="text-white/40 text-xs text-center max-w-[200px]">
-          Scan or open <span className="text-amber-400">{joinUrl}</span> on your phone
-        </p>
+        <div className="flex flex-col items-center gap-2 w-full max-w-sm">
+          <p className="text-white/40 text-xs text-center">Scan, or open this link on your phone:</p>
+          <a
+            href={joinUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-amber-400 text-sm font-mono break-all text-center hover:underline"
+          >
+            {joinUrl}
+          </a>
+          <CopyLinkButton text={joinUrl} />
+          {notice}
+        </div>
 
         {/* Seat slots */}
         <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
@@ -65,9 +80,14 @@ export function TableLobby({ state, onUpdateRules, onStartGame }: TableLobbyProp
                 animate={{ opacity: 1, scale: 1 }}
                 className={`bg-gradient-to-br ${SEAT_COLORS[i]} border rounded-xl px-3 py-2 flex items-center gap-2`}
               >
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${seat ? SEAT_DOT[i] : 'bg-white/20'}`} />
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                  seat ? (seat.connected ? SEAT_DOT[i] : 'bg-red-500 animate-pulse') : 'bg-white/20'
+                }`} />
                 <div className="min-w-0">
-                  <div className="text-xs text-white/40">Seat {i + 1}</div>
+                  <div className="text-xs text-white/40">
+                    Seat {i + 1}
+                    {seat && !seat.connected && <span className="ml-1 text-red-400">· offline</span>}
+                  </div>
                   {seat ? (
                     <div className="text-sm font-semibold text-white truncate">{seat.name}</div>
                   ) : (
@@ -90,8 +110,13 @@ export function TableLobby({ state, onUpdateRules, onStartGame }: TableLobbyProp
               ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/30 cursor-pointer'
               : 'bg-white/10 text-white/30 cursor-not-allowed'}`}
         >
-          {allFilled ? '▶ Start Game' : `Waiting for ${4 - filledCount} more…`}
+          {allFilled
+            ? '▶ Start Game'
+            : filledCount < 4
+              ? `Waiting for ${4 - filledCount} more…`
+              : 'Waiting for players to reconnect…'}
         </motion.button>
+      </div>
       </div>
 
       {/* Right: Rules panel */}
@@ -158,6 +183,49 @@ export function TableLobby({ state, onUpdateRules, onStartGame }: TableLobbyProp
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+/**
+ * Copy the join link. The Clipboard API needs a secure context, which a
+ * plain-http LAN address isn't, so fall back to execCommand, then a prompt.
+ */
+function CopyLinkButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    let ok = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch { /* fall through */ }
+    if (!ok) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      ta.remove();
+    }
+    if (!ok) {
+      window.prompt('Copy this join link:', text);
+      return;
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }
+
+  return (
+    <button
+      onClick={copy}
+      className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 text-xs font-semibold transition-colors"
+    >
+      {copied ? '✓ Copied' : '📋 Copy join link'}
+    </button>
+  );
+}
 
 function RuleRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (

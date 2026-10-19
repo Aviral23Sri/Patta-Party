@@ -1,7 +1,8 @@
 # ♠ Lakdi Table
 
 A local-multiplayer web app for the Indian card game **Call Break (Lakdi)**.  
-4 players use their phones as hands; a 5th device placed in the middle acts as the shared table.
+4 players use their phones as hands; a 5th device placed in the middle acts as the shared table.  
+Devices talk directly to each other over WebRTC (PeerJS). There is no game server.
 
 ---
 
@@ -12,29 +13,53 @@ A local-multiplayer web app for the Indian card game **Call Break (Lakdi)**.
 | Vite + React + TypeScript | Core framework |
 | Tailwind CSS v4 | Styling |
 | Framer Motion | Animations |
-| PeerJS (WebRTC) | Networking (Phase 3) |
+| PeerJS (WebRTC data channels) | Table ↔ phone networking |
 | qrcode.react | QR code for phone join |
-| Vitest | Unit tests |
+| Vitest | Unit, integration and transport-contract tests |
 
 ---
 
-## Quick Start
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open **http://localhost:5173** in your browser.
+Open **http://localhost:5173**. On one machine you can:
 
-### Testing on phones (same Wi-Fi)
+- open **`/dev`** for the Dev Simulator (table + 4 phones in one tab, no network), or
+- open **`/table`** in one tab and **`/play?room=CODE`** in up to 4 more tabs or windows. This uses real
+  PeerJS/WebRTC, even inside one browser.
+
+## Test on real phones (same Wi-Fi)
+
+Phones can't open `localhost`: that address means *the phone itself*. Serve the app on your
+laptop's LAN address instead:
 
 ```bash
-npm run dev -- --host
+npm run dev:lan
 ```
 
-This exposes the dev server on your local network IP (e.g. `http://192.168.x.x:5173`).  
-Phones on the same Wi-Fi can open that URL.
+1. Vite prints a **Network** URL, e.g. `http://192.168.1.23:5173`.
+2. On the laptop (or a tablet acting as the table), open **`http://192.168.1.23:5173/table`**.
+   Don't use `localhost`: the QR code and join link are built from the page's own origin, so they'd point
+   phones at `localhost`. If you do open `/table` on localhost, the lobby shows a warning with
+   clickable LAN addresses.
+3. Phones scan the QR code, or open the link shown under it. **📋 Copy join link** copies it so
+   you can paste it into a chat. They land on the join screen with the room code filled in.
+4. Once all 4 seats show a green dot, press **Start Game**.
+
+Troubleshooting:
+
+- **Windows firewall:** allow Node.js on *Private* networks the first time Vite asks.
+- **Phones can't load the page:** guest and "client isolation" Wi-Fi networks block
+  device-to-device traffic. Use a normal home network or a phone hotspot.
+- **The page loads but the phones never connect:** see [TURN](#strict-networks-turn) below.
+- On plain `http://` LAN addresses the browser disables the Screen Wake Lock and Clipboard
+  APIs, because both need a secure context. The app falls back gracefully: the table shows a
+  "keep this screen on manually" hint, and copying falls back to a prompt. Over `https` (any
+  deployment) both work.
 
 ---
 
@@ -42,10 +67,65 @@ Phones on the same Wi-Fi can open that URL.
 
 | URL | Description |
 |-----|-------------|
-| `/` | Home — Create Table or Join Table |
-| `/dev` | **Dev Simulator** — all 5 devices in one tab |
-| `/table` | Table (host) screen — *Phase 3, PeerJS* |
-| `/player` | Player (phone) screen — *Phase 3, PeerJS* |
+| `/` | Home: Create Table / Join Table |
+| `/?room=CODE` | QR / join link → goes straight to `/play?room=CODE` |
+| `/table` | Table (host) screen. Reserves a room code and hosts the game |
+| `/play` | Player (phone) screen. Join with name + room code |
+| `/dev` | **Dev Simulator**: all 5 devices in one tab via in-memory `LocalTransport` |
+
+---
+
+## Networking (Phase 3)
+
+```
+ Phone ──┐                         ┌── PeerJS signalling server (0.peerjs.com)
+ Phone ──┼── WebRTC data channel ──┤   only used to find each other
+ Phone ──┤   (direct, peer-to-peer)│
+ Phone ──┘            │            └── STUN/TURN for NAT traversal
+                 Table (host)
+            HostController = single source of truth
+```
+
+- **Room code → peer ID.** The table registers `lakdi-<CODE>` on the PeerJS server. Codes are 4
+  characters from an alphabet without `0/O/1/I/L`. If the ID is taken, it retries with a new code.
+- **Transports are swappable.** `PeerHostTransport` / `PeerClientTransport` implement the
+  same `HostTransport` / `ClientTransport` interfaces as the in-memory `LocalHub`, and contain no
+  game logic. The same contract test suite runs against both.
+- **Reconnection.** Each phone keeps its seat token in `sessionStorage`, so every tab is its own
+  player and a refresh keeps the token. If a phone refreshes, sleeps or drops, it reconnects and
+  re-sends `JOIN` with its token. The host gives it back the same seat and its current hand. The
+  phone shows a **Reconnecting…** banner meanwhile. *Closing* the tab discards the token, and
+  that seat can't be reclaimed mid-game.
+- **Disconnected players** show a red dot or "📴 disconnected" on the table. Their turn is **never
+  skipped**: the table shows "Waiting for X to reconnect…".
+- **Host gone.** When the table closes it broadcasts `HOST_DISCONNECTED`. If the host vanishes
+  without a goodbye, phones give up after a few reconnect attempts. Either way the phone shows
+  *"Host disconnected: ask the table to restart"*. Game state lives only on the table, so
+  refreshing the table ends the game; the table asks for confirmation first.
+- **Heartbeat.** The host pings every connection every 5 s and the phone answers. A link silent for
+  15 s is treated as dead on both sides: the host marks the seat offline and the phone reconnects.
+- **Screen Wake Lock** keeps the table awake, and the phones awake during a game, where supported.
+- **Security basics.** Every inbound frame must be a string under a size cap (2 KB phone→host). It
+  is JSON-parsed safely and validated by hand-written guards (`src/net/protocol.ts`) that return a
+  sanitised copy. The host ignores everything except `JOIN` from a connection that hasn't joined,
+  and closes connections that keep sending garbage. Seat tokens are 96-bit random values.
+
+### Strict networks (TURN)
+
+Public STUN servers (Google, Cloudflare) are configured by default. That covers the same Wi-Fi and
+most home routers. Corporate Wi-Fi, some mobile carriers and symmetric NATs need a **TURN relay**.
+Copy `.env.example` to `.env.local` (or set the variables on your host) and fill in:
+
+```bash
+VITE_TURN_URLS=turn:turn.example.com:3478,turns:turn.example.com:5349
+VITE_TURN_USERNAME=...
+VITE_TURN_CREDENTIAL=...
+```
+
+The config is built in `src/net/peerConfig.ts`. You can also point at your own PeerJS
+signalling server with `VITE_PEER_HOST` / `VITE_PEER_PORT` / `VITE_PEER_PATH` / `VITE_PEER_SECURE`.
+⚠️ `VITE_*` values are baked into the client bundle and are **public**, so use short-lived or
+restricted TURN credentials.
 
 ---
 
@@ -53,9 +133,10 @@ Phones on the same Wi-Fi can open that URL.
 
 The fastest way to test the whole game:
 
-- **Left panel (60%)** — the Table device (lobby → gameplay → scores)
-- **Right panel (40%)** — 4 phone-sized frames, one per player (Alice/Bob/Carol/Dave)
-- All connected through an in-memory `LocalHub` — no network needed
+- **Left panel (60%):** the Table device (lobby → gameplay → scores)
+- **Right panel (40%):** 4 phone-sized frames, one per player (Alice/Bob/Carol/Dave). **▲ expand**
+  enlarges one.
+- All connected through an in-memory `LocalHub`, with no network
 
 ### Dev controls (bottom bar)
 
@@ -71,34 +152,40 @@ The fastest way to test the whole game:
 
 ```
 src/
-  engine/          Pure TypeScript game logic (zero UI/network)
-    types.ts       Card, GameState, GameRules, ScoreResult …
-    deck.ts        buildDeck, shuffleDeck (Fisher-Yates), dealCards
-    moves.ts       legalMoves, trickWinnerIndex, isLegalPlay
-    scoring.ts     computePlayerScore, buildRoundSummary
-    engine.ts      createInitialState, startRound, applyBid, applyPlay
-    __tests__/     84 Vitest tests (100% pass)
+  engine/              Pure TypeScript game logic (zero UI/network)
+    types.ts           Card, GameState, GameRules, ScoreResult …
+    deck.ts            buildDeck, shuffleDeck (Fisher-Yates), dealCards
+    moves.ts           legalMoves, trickWinnerIndex, isLegalPlay
+    scoring.ts         computePlayerScore, buildRoundSummary
+    engine.ts          createInitialState, startRound, applyBid, applyPlay
 
-  net/             Transport layer
-    transport.ts   Typed message unions + HostTransport/ClientTransport interfaces
-    host.ts        HostController — owns GameState, validates all moves
-    localTransport.ts  In-memory LocalHub (Phase 2)
-    __tests__/     16 Vitest integration tests
+  net/                 Transport layer
+    transport.ts       Message unions + HostTransport/ClientTransport interfaces
+    protocol.ts        Frame encode/decode, size caps, runtime shape guards
+    host.ts            HostController: owns GameState, validates all moves, seats/tokens
+    localTransport.ts  In-memory LocalHub (dev simulator, tests)
+    peerHostTransport.ts    WebRTC host: room-code reservation, heartbeat, frame validation
+    peerClientTransport.ts  WebRTC client: reconnect with backoff, heartbeat watchdog
+    peerTypes.ts       Minimal PeerJS interfaces + lazy-loading factory
+    peerConfig.ts      ICE servers (STUN + optional TURN) and signalling options from env
+    roomCode.ts        Room codes, peer IDs, join URLs
 
   ui/
-    components/    Shared — CardDisplay, TrickCardSlot
-    table/         TableView, TableLobby, TableGameplay,
-                   TableRoundSummary, TableLeaderboard, Scoreboard
-    player/        PlayerView, PlayerJoin, BidPicker, PlayerHand
-    dev/           DevSimulator
+    components/        CardDisplay
+    hooks/             useWakeLock
+    table/             TableHostPage, TableView, TableLobby, TableGameplay,
+                       TableRoundSummary, TableLeaderboard, Scoreboard
+    player/            PlayerPage, PlayerView, PlayerJoin, BidPicker, PlayerHand
+    dev/               DevSimulator
 ```
 
 ### Key design decisions
 
 1. **Engine is pure**: `applyBid` / `applyPlay` take state → return new state. No mutation, no I/O.
-2. **Host is the single source of truth**: every client message is validated server-side. Clients can't cheat.
+2. **Host is the single source of truth**: every client message is validated on the host. Clients can't cheat.
 3. **Hands are private**: `PRIVATE_STATE` is sent only to the owning seat. `PUBLIC_STATE` never includes hands.
-4. **Transport is swappable**: `LocalHub` (Phase 2) and PeerJS (Phase 3) both implement the same `HostTransport` / `ClientTransport` interfaces.
+4. **Transport is swappable**: `LocalHub` and the PeerJS transports implement the same interfaces
+   and pass the same contract tests.
 
 ---
 
@@ -127,25 +214,53 @@ src/
 ```bash
 npm test                  # run all tests once
 npm run test:watch        # watch mode
-npm run test:coverage     # coverage report
+npm run test:coverage     # coverage report (engine + net)
 ```
 
-**5 test files · 100 tests · 100% passing**
+| Suite | What it covers |
+|-------|----------------|
+| `engine/__tests__/*` | Deck, legal moves, scoring, state machine |
+| `net/__tests__/host.test.ts` | HostController: joins, validation, privacy, JOIN gating, reconnection |
+| `net/__tests__/protocol.test.ts` | Message guards, frame size caps, room codes, ICE config |
+| `net/__tests__/transport.contract.test.ts` | One contract suite run against **LocalTransport** and **PeerJS transports** (mocked PeerJS) |
+| `net/__tests__/peerTransport.test.ts` | Room-code retry, garbage frames, heartbeat timeouts, reconnect, host-lost |
 
 ---
 
-## Deploy (Vercel / Netlify)
+## Deploy
 
 ```bash
-npm run build        # outputs to dist/
+npm run build        # type-checks, then outputs a static site to dist/
 ```
 
-No backend required — it's a pure static site.  
-Upload `dist/` to Vercel, Netlify, or any static host.
+There's no backend, so any static host works. The site must be served over **HTTPS**, which
+Vercel and Netlify do by default; Wake Lock and Clipboard need it. The routes (`/table`, `/play`,
+`/dev`) are client-side, so the host needs an SPA fallback. Both are already configured:
 
-For Vite's SPA routing, add a catch-all redirect rule:  
-- **Netlify**: `_redirects` → `/* /index.html 200`  
-- **Vercel**: `vercel.json` → `{ "rewrites": [{ "source": "/(.*)", "destination": "/" }] }`
+### Vercel
+
+`vercel.json` rewrites every path to `index.html`.
+
+1. Import the repo at <https://vercel.com/new>. The framework preset is **Vite**, the build command is
+   `npm run build` and the output directory is `dist`.
+2. Optional: add the `VITE_TURN_*` / `VITE_PEER_*` variables under *Settings → Environment
+   Variables*, then redeploy.
+
+Or from the CLI: `npx vercel` (preview) and `npx vercel --prod`.
+
+### Netlify
+
+`public/_redirects` (`/* /index.html 200`) is copied into `dist/` at build time.
+
+1. *Add new site → Import an existing project*. Use `npm run build` as the build command and `dist` as the
+   publish directory.
+2. Optional: add the `VITE_TURN_*` / `VITE_PEER_*` variables under *Site configuration →
+   Environment variables*, then redeploy.
+
+Or drag-and-drop the `dist/` folder onto <https://app.netlify.com/drop>.
+
+After deploying, open `https://<your-site>/table` on the table device. The QR code automatically uses
+the deployed origin.
 
 ---
 
@@ -155,5 +270,5 @@ For Vite's SPA routing, add a catch-all redirect rule:
 |-------|--------|-------------|
 | 1 | ✅ Done | Pure engine + Vitest tests |
 | 2 | ✅ Done | Table + Player UI + LocalTransport dev simulator |
-| 3 | 🔜 Next | PeerJS networking (swap LocalHub for PeerJSHub) |
-| 4 | 🔜 Next | Polish: animations, vibration, QR join, production deploy |
+| 3 | ✅ Done | PeerJS networking, reconnection, heartbeat, wake lock, deploy config |
+| 4 | 🔜 Next | Polish: animations, sounds, production hardening |

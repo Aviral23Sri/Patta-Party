@@ -1,45 +1,43 @@
 /**
  * PlayerJoin – the first screen on a player's phone.
- * Lets them type their name and connect to a room.
+ * Collects name + room code; the parent owns the connection.
  */
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import type { ClientTransport } from '../../net/transport';
+import { MAX_NAME_LENGTH } from '../../net/protocol';
+import { normalizeRoomCode, ROOM_CODE_LENGTH } from '../../net/roomCode';
 
 interface PlayerJoinProps {
-  transport: ClientTransport;
   defaultName?: string;
   defaultRoom?: string;
-  onJoined: (name: string) => void;
+  /** Error from the last attempt (table not found, table full…). */
+  error?: string;
+  busy?: boolean;
+  onSubmit: (name: string, roomCode: string) => void;
+  onBack?: () => void;
 }
 
-export function PlayerJoin({ transport, defaultName = '', defaultRoom = '', onJoined }: PlayerJoinProps) {
+export function PlayerJoin({
+  defaultName = '',
+  defaultRoom = '',
+  error: externalError,
+  busy = false,
+  onSubmit,
+  onBack,
+}: PlayerJoinProps) {
   const [name, setName] = useState(defaultName);
   const [roomCode, setRoomCode] = useState(defaultRoom);
-  const [error, setError] = useState('');
-  const [joining, setJoining] = useState(false);
-
-  const token = localStorage.getItem(`lakdi_token_${roomCode}`) ?? undefined;
+  const [localError, setLocalError] = useState('');
+  const error = localError || externalError;
 
   function handleJoin() {
+    if (busy) return;
     const trimName = name.trim();
-    if (!trimName) { setError('Enter your name.'); return; }
-    setJoining(true);
-    setError('');
-
-    // Set up one-time handler to catch SEAT_ASSIGNED or REJECTED
-    transport.onMessage((msg) => {
-      if (msg.type === 'SEAT_ASSIGNED') {
-        localStorage.setItem(`lakdi_token_${roomCode}`, msg.token);
-        localStorage.setItem(`lakdi_name_${roomCode}`, trimName);
-        onJoined(trimName);
-      } else if (msg.type === 'REJECTED') {
-        setError(msg.reason);
-        setJoining(false);
-      }
-    });
-
-    transport.send({ type: 'JOIN', name: trimName, token });
+    if (!trimName) { setLocalError('Enter your name.'); return; }
+    const code = normalizeRoomCode(roomCode);
+    if (!code) { setLocalError(`Room code is ${ROOM_CODE_LENGTH} letters/digits.`); return; }
+    setLocalError('');
+    onSubmit(trimName, code);
   }
 
   return (
@@ -61,22 +59,26 @@ export function PlayerJoin({ transport, defaultName = '', defaultRoom = '', onJo
       </motion.div>
 
       {/* Form */}
-      <motion.div
+      <motion.form
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
         className="w-full max-w-sm space-y-4"
+        onSubmit={(e) => { e.preventDefault(); handleJoin(); }}
       >
         {/* Name */}
         <div>
-          <label className="block text-xs text-white/50 mb-1.5 uppercase tracking-widest">Your Name</label>
+          <label htmlFor="player-name" className="block text-xs text-white/50 mb-1.5 uppercase tracking-widest">
+            Your Name
+          </label>
           <input
+            id="player-name"
             type="text"
             value={name}
-            onChange={(e) => { setName(e.target.value); setError(''); }}
-            onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+            onChange={(e) => { setName(e.target.value); setLocalError(''); }}
             placeholder="e.g. Rahul"
-            maxLength={20}
+            maxLength={MAX_NAME_LENGTH}
+            autoComplete="nickname"
             autoFocus
             className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3
               text-white placeholder-white/25 text-base outline-none
@@ -84,30 +86,37 @@ export function PlayerJoin({ transport, defaultName = '', defaultRoom = '', onJo
           />
         </div>
 
-        {/* Room code (optional if auto-filled from QR) */}
-        {!defaultRoom && (
-          <div>
-            <label className="block text-xs text-white/50 mb-1.5 uppercase tracking-widest">Room Code</label>
-            <input
-              type="text"
-              value={roomCode}
-              onChange={(e) => setRoomCode(e.target.value.toUpperCase().slice(0, 4))}
-              onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-              placeholder="XXXX"
-              maxLength={4}
-              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3
-                text-white placeholder-white/25 text-base outline-none text-center
-                font-mono tracking-[0.3em] text-lg
-                focus:border-amber-400/60 focus:bg-white/15 transition-colors"
-            />
-          </div>
-        )}
+        {/* Room code (prefilled from the QR link) */}
+        <div>
+          <label htmlFor="room-code" className="block text-xs text-white/50 mb-1.5 uppercase tracking-widest">
+            Room Code
+          </label>
+          <input
+            id="room-code"
+            type="text"
+            value={roomCode}
+            onChange={(e) => {
+              setRoomCode(e.target.value.toUpperCase().replace(/\s/g, '').slice(0, ROOM_CODE_LENGTH));
+              setLocalError('');
+            }}
+            placeholder="XXXX"
+            maxLength={ROOM_CODE_LENGTH}
+            autoCapitalize="characters"
+            autoComplete="off"
+            spellCheck={false}
+            className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3
+              text-white placeholder-white/25 outline-none text-center
+              font-mono tracking-[0.3em] text-lg
+              focus:border-amber-400/60 focus:bg-white/15 transition-colors"
+          />
+        </div>
 
         {/* Error */}
         {error && (
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
+            role="alert"
             className="text-red-400 text-sm text-center"
           >
             {error}
@@ -116,19 +125,29 @@ export function PlayerJoin({ transport, defaultName = '', defaultRoom = '', onJo
 
         {/* Join button */}
         <motion.button
+          type="submit"
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.97 }}
-          onClick={handleJoin}
-          disabled={joining}
+          disabled={busy}
           className={`w-full py-4 rounded-2xl text-base font-bold transition-all
-            ${joining
+            ${busy
               ? 'bg-white/10 text-white/40 cursor-not-allowed'
               : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/30 cursor-pointer'
             }`}
         >
-          {joining ? '⏳ Joining…' : 'Join Table ♠'}
+          {busy ? '⏳ Connecting…' : 'Join Table ♠'}
         </motion.button>
-      </motion.div>
+
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="w-full text-white/40 text-sm hover:text-white/70"
+          >
+            ← Back
+          </button>
+        )}
+      </motion.form>
     </div>
     </div>
   );

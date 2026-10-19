@@ -26,30 +26,36 @@ import type {
   PublicGameState,
   SeatInfo,
 } from './transport';
+import { parseC2H } from './protocol';
+import { generateRoomCode } from './roomCode';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Seat token: the phone's proof of ownership when it reconnects. */
 function generateToken(): string {
-  return Math.random().toString(36).slice(2, 10);
+  // getRandomValues works on plain-http LAN origins (randomUUID doesn't).
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = crypto.getRandomValues(new Uint8Array(12));
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
 }
 
-function generateRoomCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 4; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return code;
+export interface HostControllerOptions {
+  /** Use this room code (e.g. the one PeerHostTransport reserved). */
+  roomCode?: string;
 }
 
 // ─── HostController ───────────────────────────────────────────────────────────
 
 export class HostController {
   private transport: HostTransport;
+  private unsubscribers: Array<() => void> = [];
 
   // Lobby state (before game starts)
   private seats: Array<SeatInfo | null> = [null, null, null, null];
   private seatTokens: string[] = ['', '', '', ''];
+  /** Only peers that completed JOIN appear here. */
   private peerIdToSeat: Map<string, PlayerId> = new Map();
 
   // Game state (null until startGame() is called)
@@ -68,32 +74,44 @@ export class HostController {
   // Public state subscribers (for the Table View to observe directly)
   private stateListeners: Set<(state: PublicGameState) => void> = new Set();
 
-  constructor(transport: HostTransport, rules: Partial<GameRules> = {}) {
+  constructor(
+    transport: HostTransport,
+    rules: Partial<GameRules> = {},
+    options: HostControllerOptions = {},
+  ) {
     this.transport = transport;
     this.rules = rules;
-    this.roomCode = generateRoomCode();
+    this.roomCode = options.roomCode ?? generateRoomCode();
 
     // Pre-generate seat tokens
     for (let i = 0; i < 4; i++) {
       this.seatTokens[i] = generateToken();
     }
 
-    transport.onConnect(() => {
-      // Nothing needed here for LocalTransport; PeerJS will use this
-    });
-
-    transport.onDisconnect((peerId) => {
-      const seat = this.peerIdToSeat.get(peerId);
-      if (seat !== undefined) {
+    this.unsubscribers.push(
+      transport.onDisconnect((peerId) => {
+        const seat = this.peerIdToSeat.get(peerId);
+        this.peerIdToSeat.delete(peerId);
+        if (seat === undefined) return;
+        // A stale connection closing after the phone already reconnected on
+        // a new one must not mark the seat offline.
+        if (this.peerForSeat(seat) !== undefined) return;
         const info = this.seats[seat];
         if (info) {
           this.seats[seat] = { ...info, connected: false };
           this.broadcastAll();
         }
-      }
-    });
+      }),
+      transport.onMessage((peerId, msg) => this.handleMessage(peerId, msg)),
+    );
+  }
 
-    transport.onMessage((peerId, msg) => this.handleMessage(peerId, msg));
+  /** Detach from the transport (the Table page calls this on unmount). */
+  dispose(): void {
+    this.unsubscribers.forEach((u) => u());
+    this.unsubscribers = [];
+    if (this.lastCompletedTrickTimer) clearTimeout(this.lastCompletedTrickTimer);
+    this.stateListeners.clear();
   }
 
   // ─── Public API (for TableView) ─────────────────────────────────────────────
@@ -139,7 +157,14 @@ export class HostController {
 
   // ─── Message handling ────────────────────────────────────────────────────────
 
-  handleMessage(peerId: string, msg: C2HMessage): void {
+  handleMessage(peerId: string, raw: C2HMessage): void {
+    // Defence in depth: transports validate too, but never trust the caller.
+    const msg = parseC2H(raw);
+    if (!msg) return;
+
+    // Until a connection has completed JOIN, JOIN is the only thing we accept.
+    if (msg.type !== 'JOIN' && !this.peerIdToSeat.has(peerId)) return;
+
     switch (msg.type) {
       case 'JOIN':
         this.handleJoin(peerId, msg.name, msg.token);
@@ -160,8 +185,12 @@ export class HostController {
     // Check for reconnect by token
     if (token) {
       const seatIdx = this.seatTokens.findIndex((t) => t === token);
-      if (seatIdx !== -1) {
+      if (seatIdx !== -1 && this.seats[seatIdx]) {
         const seat = seatIdx as PlayerId;
+        // The seat moves to this connection; forget any older one.
+        for (const [pid, s] of this.peerIdToSeat) {
+          if (s === seat && pid !== peerId) this.peerIdToSeat.delete(pid);
+        }
         this.peerIdToSeat.set(peerId, seat);
         const info = this.seats[seat];
         if (info) {
@@ -331,6 +360,13 @@ export class HostController {
         this.sendPrivateTo(i as PlayerId);
       }
     }
+  }
+
+  private peerForSeat(seat: PlayerId): string | undefined {
+    for (const [peerId, s] of this.peerIdToSeat) {
+      if (s === seat) return peerId;
+    }
+    return undefined;
   }
 
   private sendToSeat(seat: PlayerId, msg: import('./transport').H2CMessage): void {

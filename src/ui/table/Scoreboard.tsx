@@ -32,6 +32,9 @@ export function Scoreboard({ state }: ScoreboardProps) {
               ${isTurn ? 'bg-green-500/20 ring-1 ring-green-400' : 'bg-white/5'}`}
           >
             <div className="flex items-center gap-1">
+              {!seat.connected && (
+                <span title="Disconnected" className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+              )}
               <span className="text-xs font-semibold text-white/90 max-w-[60px] truncate">
                 {seat.name}
               </span>

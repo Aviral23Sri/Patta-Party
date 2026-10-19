@@ -1,0 +1,3 @@
+# Netlify SPA fallback: serve index.html for client-side routes (/table, /play, /dev).
+# Real files (assets, favicon) are matched first because this is not a forced (200!) rule.
+/*    /index.html   200

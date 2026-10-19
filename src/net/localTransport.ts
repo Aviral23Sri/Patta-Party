@@ -5,12 +5,19 @@
  * in-memory. No network, no serialisation, zero latency (async via
  * setTimeout(0) to keep the call stack clean and mimic real async).
  *
- * Phase 3: swap this entire module for PeerJSTransport with no changes
- * to HostController or any UI component.
+ * Implements the same HostTransport / ClientTransport contract as the
+ * PeerJS transports, so HostController and the UI can't tell them apart.
  */
 
 import { HostController } from './host';
-import type { C2HMessage, ClientTransport, H2CMessage, HostTransport } from './transport';
+import type {
+  C2HMessage,
+  ClientTransport,
+  ConnectionStatus,
+  H2CMessage,
+  HostTransport,
+  Unsubscribe,
+} from './transport';
 import type { GameRules, PlayerId } from '../engine/types';
 import { legalMoves } from '../engine';
 
@@ -22,69 +29,87 @@ import { legalMoves } from '../engine';
  */
 export class LocalHub {
   readonly host: HostController;
+  readonly hostTransport: HostTransport;
 
-  private hostMessageHandler: ((peerId: string, msg: C2HMessage) => void) | null = null;
-  private hostConnectHandler: ((peerId: string) => void) | null = null;
-  private hostDisconnectHandler: ((peerId: string) => void) | null = null;
+  private hostMessageHandlers = new Set<(peerId: string, msg: C2HMessage) => void>();
+  private hostConnectHandlers = new Set<(peerId: string) => void>();
+  private hostDisconnectHandlers = new Set<(peerId: string) => void>();
 
-  /** peerId → message handler for that client */
-  private clientHandlers: Map<string, (msg: H2CMessage) => void> = new Map();
+  /** peerId → message handlers for that client */
+  private clientHandlers: Map<string, Set<(msg: H2CMessage) => void>> = new Map();
 
   constructor(rules: Partial<GameRules> = {}) {
-    const hostTransport: HostTransport = {
-      onMessage: (h) => { this.hostMessageHandler = h; },
-      onConnect: (h) => { this.hostConnectHandler = h; },
-      onDisconnect: (h) => { this.hostDisconnectHandler = h; },
+    const subscribe = <T>(set: Set<T>, h: T): Unsubscribe => {
+      set.add(h);
+      return () => set.delete(h);
+    };
+
+    this.hostTransport = {
+      onMessage: (h) => subscribe(this.hostMessageHandlers, h),
+      onConnect: (h) => subscribe(this.hostConnectHandlers, h),
+      onDisconnect: (h) => subscribe(this.hostDisconnectHandlers, h),
       sendToPlayer: (peerId, msg) => {
         // Deliver asynchronously to simulate network
-        const handler = this.clientHandlers.get(peerId);
-        if (handler) setTimeout(() => handler(msg), 0);
+        const handlers = this.clientHandlers.get(peerId);
+        if (handlers) setTimeout(() => handlers.forEach((h) => h(msg)), 0);
       },
       broadcast: (msg) => {
-        for (const [, handler] of this.clientHandlers) {
-          setTimeout(() => handler(msg), 0);
+        for (const [, handlers] of this.clientHandlers) {
+          setTimeout(() => handlers.forEach((h) => h(msg)), 0);
         }
       },
     };
 
-    this.host = new HostController(hostTransport, rules);
+    this.host = new HostController(this.hostTransport, rules);
   }
 
   /**
-   * Create a ClientTransport for the given peerId.
-   * Call this once per "phone" in the DevSimulator.
+   * Create a ClientTransport for the given peerId. It is connected
+   * immediately. Call this once per "phone" in the DevSimulator.
    */
   createClientTransport(peerId: string): ClientTransport {
-    let messageHandler: ((msg: H2CMessage) => void) | null = null;
-    let connected = false;
+    const handlers = new Set<(msg: H2CMessage) => void>();
+    let status: ConnectionStatus = 'connected';
+    const statusHandlers = new Set<(s: ConnectionStatus) => void>();
+
+    this.clientHandlers.set(peerId, handlers);
+    for (const h of this.hostConnectHandlers) h(peerId);
 
     return {
       send: (msg: C2HMessage) => {
-        if (!connected) return;
+        if (status !== 'connected') return;
         setTimeout(() => {
-          this.hostMessageHandler?.(peerId, msg);
+          for (const h of this.hostMessageHandlers) h(peerId, msg);
         }, 0);
       },
 
-      onMessage: (handler: (msg: H2CMessage) => void) => {
-        messageHandler = handler;
-        this.clientHandlers.set(peerId, (msg) => messageHandler?.(msg));
+      onMessage: (handler) => {
+        handlers.add(handler);
+        return () => handlers.delete(handler);
+      },
 
-        if (!connected) {
-          connected = true;
-          this.hostConnectHandler?.(peerId);
-        }
+      onStatus: (handler) => {
+        statusHandlers.add(handler);
+        handler(status);
+        return () => statusHandlers.delete(handler);
       },
 
       disconnect: () => {
-        connected = false;
+        if (status !== 'connected') return;
+        status = 'host_lost';
         this.clientHandlers.delete(peerId);
-        this.hostDisconnectHandler?.(peerId);
+        for (const h of this.hostDisconnectHandlers) h(peerId);
+        for (const h of statusHandlers) h(status);
       },
     };
   }
 
   // ─── Dev helpers ──────────────────────────────────────────────────────────────
+
+  /** Deliver a message to the host as if it came from `peerId`. */
+  private injectFromPeer(peerId: string, msg: C2HMessage): void {
+    for (const h of this.hostMessageHandlers) h(peerId, msg);
+  }
 
   /**
    * Auto-play one random legal card (or bid) for the given seat.
@@ -99,7 +124,7 @@ export class LocalHub {
 
     if (pub.phase === 'bidding' && pub.currentTurn === seat) {
       const bid = state.rules.minBid + Math.floor(Math.random() * 4);
-      this.hostMessageHandler?.(peerId, { type: 'BID', amount: Math.min(bid, 13) });
+      this.injectFromPeer(peerId, { type: 'BID', amount: Math.min(bid, 13) });
       return;
     }
 
@@ -108,7 +133,7 @@ export class LocalHub {
       const legal = legalMoves(hand, state.currentTrick, state.rules);
       if (legal.length > 0) {
         const card = legal[Math.floor(Math.random() * legal.length)];
-        this.hostMessageHandler?.(peerId, { type: 'PLAY', card });
+        this.injectFromPeer(peerId, { type: 'PLAY', card });
       }
     }
   }

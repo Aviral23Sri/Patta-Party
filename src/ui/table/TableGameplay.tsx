@@ -37,6 +37,9 @@ const TRICK_CARD_OFFSETS: Record<PlayerId, { x: number; y: number }> = {
 export function TableGameplay({ state }: TableGameplayProps) {
   const filledSeats = state.seats.filter(Boolean) as SeatInfo[];
   const lastTrick = state.lastCompletedTrick;
+  // We never skip a disconnected player's turn; we wait and say so.
+  const waitingOn = state.currentTurn !== null ? state.seats[state.currentTurn] : null;
+  const waitingOnOffline = waitingOn && !waitingOn.connected ? waitingOn : null;
 
   return (
     <div className="flex-1 relative felt-table overflow-hidden">
@@ -83,6 +86,9 @@ export function TableGameplay({ state }: TableGameplayProps) {
                   <span className="text-[9px] bg-amber-500 text-black px-1 rounded font-bold">D</span>
                 )}
               </div>
+              {!seat.connected && (
+                <div className="text-[10px] font-bold text-red-300 mt-0.5">📴 disconnected</div>
+              )}
               {/* Bid / tricks */}
               <div className="text-xs text-white/60 mt-0.5 tabular-nums">
                 {bid !== null
@@ -94,6 +100,17 @@ export function TableGameplay({ state }: TableGameplayProps) {
           </div>
         );
       })}
+
+      {/* ── Waiting on a disconnected player ─────────────────────────────── */}
+      {waitingOnOffline && !lastTrick && (
+        <div
+          role="status"
+          className="absolute top-14 left-1/2 -translate-x-1/2 z-20 px-4 py-1.5 rounded-full
+            bg-red-500/90 text-white text-xs font-bold shadow-lg whitespace-nowrap"
+        >
+          Waiting for {waitingOnOffline.name} to reconnect…
+        </div>
+      )}
 
       {/* ── Win announcement ──────────────────────────────────────────────── */}
       <AnimatePresence>

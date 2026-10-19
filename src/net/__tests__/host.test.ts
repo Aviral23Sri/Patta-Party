@@ -17,8 +17,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { LocalHub } from '../localTransport';
-import type { H2CMessage, PrivatePlayerState } from '../transport';
+import { HostController } from '../host';
+import type { C2HMessage, H2CMessage, PrivatePlayerState } from '../transport';
 import type { PlayerId } from '../../engine/types';
+import { buildDeck } from '../../engine';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -273,13 +275,24 @@ describe('PLAY validation', () => {
     const { transports, messages } = await playingState();
     const pub = lastMsg(messages[0], 'PUBLIC_STATE')!.state;
     const turn = pub.currentTurn as PlayerId;
-    // Send a fake card
-    transports[turn].send({
-      type: 'PLAY',
-      card: { id: 'FAKE', suit: 'H', rank: '2' },
-    });
+    // A well-formed card that someone else holds (malformed cards never
+    // reach the engine: the protocol guard drops them, tested below).
+    const myHand = lastMsg(messages[turn], 'PRIVATE_STATE')!.state.myHand;
+    const notMine = buildDeck().find((c) => !myHand.some((h) => h.id === c.id))!;
+    transports[turn].send({ type: 'PLAY', card: notMine });
     await flush();
     expect(lastMsg(messages[turn], 'REJECTED')).toBeDefined();
+  });
+
+  it('silently drops a malformed card', async () => {
+    const { transports, messages } = await playingState();
+    const pub = lastMsg(messages[0], 'PUBLIC_STATE')!.state;
+    const turn = pub.currentTurn as PlayerId;
+    const before = messages[turn].length;
+    transports[turn].send({ type: 'PLAY', card: { id: 'FAKE', suit: 'H', rank: '2' } });
+    await flush();
+    expect(messages[turn].slice(before).some((m) => m.type === 'REJECTED')).toBe(false);
+    expect(lastMsg(messages[0], 'PUBLIC_STATE')!.state.currentTrick.plays).toHaveLength(0);
   });
 
   it('accepts a legal play', async () => {
@@ -389,5 +402,100 @@ describe('Rules configuration', () => {
     const pub = lastMsg(msgs, 'PUBLIC_STATE');
     expect(pub?.state.rules.minBid).toBe(3);
     expect(pub?.state.rules.totalRounds).toBe(3);
+  });
+});
+
+// ─── Phase 3: hardening & reconnection ────────────────────────────────────────
+
+describe('Connections that have not completed JOIN', () => {
+  it('are ignored: no state change and no reply', async () => {
+    const { hub, joinAll } = setupHub(4);
+    await joinAll();
+    hub.host.startGame();
+    await flush();
+    const turn = hub.host.buildPublicState().currentTurn!;
+
+    // A stranger connects and tries to bid for the current player.
+    const stranger = hub.createClientTransport('stranger');
+    const strangerMsgs: H2CMessage[] = [];
+    stranger.onMessage((m) => strangerMsgs.push(m));
+    stranger.send({ type: 'BID', amount: 3 });
+    await flush();
+
+    expect(hub.host.buildPublicState().bids[turn]).toBeNull();
+    expect(strangerMsgs.filter((m) => m.type !== 'PUBLIC_STATE')).toEqual([]);
+  });
+
+  it('ignores malformed messages even from seated players', async () => {
+    const { hub, transports, joinAll } = setupHub(4);
+    await joinAll();
+    hub.host.startGame();
+    await flush();
+    const turn = hub.host.buildPublicState().currentTurn!;
+    transports[turn].send({ type: 'BID', amount: 'lots' } as unknown as C2HMessage);
+    await flush();
+    expect(hub.host.buildPublicState().bids[turn]).toBeNull();
+  });
+});
+
+describe('Reconnection', () => {
+  it('marks a seat offline on disconnect and online again after token rejoin', async () => {
+    const { hub, transports, messages, joinAll } = setupHub(4);
+    await joinAll();
+    hub.host.startGame();
+    await flush();
+    const token = lastMsg(messages[1], 'SEAT_ASSIGNED')!.token;
+
+    transports[1].disconnect();
+    await flush();
+    expect(hub.host.buildPublicState().seats[1]?.connected).toBe(false);
+
+    const back = hub.createClientTransport('seat-1-again');
+    const backMsgs: H2CMessage[] = [];
+    back.onMessage((m) => backMsgs.push(m));
+    back.send({ type: 'JOIN', name: 'Bob', token });
+    await flush();
+
+    expect(hub.host.buildPublicState().seats[1]?.connected).toBe(true);
+    expect(lastMsg(backMsgs, 'SEAT_ASSIGNED')?.seat).toBe(1);
+    // Gets its hand back mid-game
+    expect(lastMsg(backMsgs, 'PRIVATE_STATE')?.state.myHand).toHaveLength(13);
+  });
+
+  it('a stale connection closing after a reconnect does not mark the seat offline', async () => {
+    const { hub, transports, messages, joinAll } = setupHub(4);
+    await joinAll();
+    const token = lastMsg(messages[2], 'SEAT_ASSIGNED')!.token;
+
+    // Phone reconnects on a new connection before the old one is noticed dead.
+    const fresh = hub.createClientTransport('seat-2-fresh');
+    fresh.onMessage(() => {});
+    fresh.send({ type: 'JOIN', name: 'Carol', token });
+    await flush();
+
+    transports[2].disconnect(); // old link finally times out
+    await flush();
+    expect(hub.host.buildPublicState().seats[2]?.connected).toBe(true);
+  });
+
+  it('does not skip a disconnected player’s turn', async () => {
+    const { hub, transports, joinAll } = setupHub(4);
+    await joinAll();
+    hub.host.startGame();
+    await flush();
+    const turn = hub.host.buildPublicState().currentTurn!;
+    transports[turn].disconnect();
+    await flush();
+    const pub = hub.host.buildPublicState();
+    expect(pub.currentTurn).toBe(turn);
+    expect(pub.seats[turn]?.connected).toBe(false);
+  });
+
+  it('uses the room code supplied by the transport', () => {
+    const hub = new LocalHub();
+    const controller = new HostController(hub.hostTransport, {}, { roomCode: 'WXYZ' });
+    expect(controller.roomCode).toBe('WXYZ');
+    expect(controller.buildPublicState().roomCode).toBe('WXYZ');
+    controller.dispose();
   });
 });

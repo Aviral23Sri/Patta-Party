@@ -84,17 +84,23 @@ export type H2CMessage =
 
 // ─── Transport interfaces ─────────────────────────────────────────────────────
 
+/** Call to remove a previously registered handler. */
+export type Unsubscribe = () => void;
+
 /**
  * HostTransport: the host-side view of the network.
- * Phase 3 implements this with PeerJS (host peer receives connections).
+ * Implemented by LocalHub (in-memory) and PeerHostTransport (WebRTC).
+ *
+ * `peerId` identifies one *connection*: a phone that drops and reconnects
+ * arrives with a new peerId and re-identifies itself with its seat token.
  */
 export interface HostTransport {
   /** Register a handler for incoming client messages. */
-  onMessage(handler: (peerId: string, msg: C2HMessage) => void): void;
+  onMessage(handler: (peerId: string, msg: C2HMessage) => void): Unsubscribe;
   /** Register a handler for when a client connects. */
-  onConnect(handler: (peerId: string) => void): void;
-  /** Register a handler for when a client disconnects. */
-  onDisconnect(handler: (peerId: string) => void): void;
+  onConnect(handler: (peerId: string) => void): Unsubscribe;
+  /** Register a handler for when a client disconnects (or its heartbeat dies). */
+  onDisconnect(handler: (peerId: string) => void): Unsubscribe;
   /** Send a private message to one specific client. */
   sendToPlayer(peerId: string, msg: H2CMessage): void;
   /** Broadcast a message to ALL connected clients. */
@@ -102,14 +108,34 @@ export interface HostTransport {
 }
 
 /**
+ * Client connection lifecycle.
+ *  - connecting:   first attempt in progress
+ *  - connected:    link to the host is up (send JOIN now)
+ *  - reconnecting: link dropped after having been up; retrying
+ *  - not_found:    the room code doesn't exist (never connected)
+ *  - host_lost:    gave up reconnecting; the host is gone
+ */
+export type ConnectionStatus =
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'not_found'
+  | 'host_lost';
+
+/**
  * ClientTransport: the phone-side view of the network.
- * Phase 3 implements this with PeerJS (client peer connects to host peer).
+ * Implemented by LocalHub clients and PeerClientTransport (WebRTC).
  */
 export interface ClientTransport {
-  /** Send a message to the host. */
+  /** Send a message to the host. Dropped silently while not connected. */
   send(msg: C2HMessage): void;
   /** Register a handler for messages from the host. */
-  onMessage(handler: (msg: H2CMessage) => void): void;
+  onMessage(handler: (msg: H2CMessage) => void): Unsubscribe;
+  /**
+   * Register a handler for connection status changes. Called immediately
+   * with the current status, then on every change.
+   */
+  onStatus(handler: (status: ConnectionStatus) => void): Unsubscribe;
   /** Cleanly disconnect from the host. */
   disconnect(): void;
 }
