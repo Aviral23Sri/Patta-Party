@@ -17,7 +17,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { LocalHub } from '../localTransport';
-import { HostController } from '../host';
+import { HostController, TRICK_REVEAL_MS } from '../host';
 import type { C2HMessage, H2CMessage, PrivatePlayerState } from '../transport';
 import type { PlayerId } from '../../engine/types';
 import { buildDeck } from '../../engine';
@@ -283,6 +283,24 @@ describe('PLAY validation', () => {
     await flush();
     expect(lastMsg(messages[turn], 'REJECTED')).toBeDefined();
   });
+
+  it('keeps a completed trick (incl. the 4th card) on display, then clears it', async () => {
+    const { transports, messages } = await playingState();
+    for (let i = 0; i < 4; i++) {
+      const pub = lastMsg(messages[0], 'PUBLIC_STATE')!.state;
+      const turn = pub.currentTurn as PlayerId;
+      const legal = lastMsg(messages[turn], 'PRIVATE_STATE')!.state.legalCards;
+      transports[turn].send({ type: 'PLAY', card: legal[0] });
+      await flush();
+    }
+
+    const shown = lastMsg(messages[0], 'PUBLIC_STATE')!.state;
+    expect(shown.lastCompletedTrick?.trick.plays).toHaveLength(4);
+    expect(shown.currentTrick.plays).toHaveLength(0);
+
+    await new Promise((r) => setTimeout(r, TRICK_REVEAL_MS + 100));
+    expect(lastMsg(messages[0], 'PUBLIC_STATE')!.state.lastCompletedTrick).toBeNull();
+  }, TRICK_REVEAL_MS + 5000);
 
   it('silently drops a malformed card', async () => {
     const { transports, messages } = await playingState();

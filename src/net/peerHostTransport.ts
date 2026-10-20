@@ -32,6 +32,8 @@ export interface PeerHostOptions {
   timeoutMs?: number;
   /** Close a connection after this many invalid frames. */
   maxInvalidFrames?: number;
+  /** A phone whose link hasn't opened after this long is reported as stalled (ms). */
+  stallMs?: number;
 }
 
 /** Signalling-server link status, for an indicator on the Table. */
@@ -55,6 +57,8 @@ export class PeerHostTransport implements HostTransport {
   private readonly connectHandlers = new Set<(peerId: string) => void>();
   private readonly disconnectHandlers = new Set<(peerId: string) => void>();
   private readonly signalHandlers = new Set<(s: HostSignalStatus) => void>();
+  private readonly linkFailureHandlers = new Set<() => void>();
+  private readonly stallMs: number;
   private signalStatus: HostSignalStatus = 'online';
   private heartbeatTimer: ReturnType<typeof setInterval>;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -91,6 +95,7 @@ export class PeerHostTransport implements HostTransport {
     this.roomCode = roomCode;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.maxInvalidFrames = options.maxInvalidFrames ?? 20;
+    this.stallMs = options.stallMs ?? 15_000;
 
     peer.on('connection', (conn) => this.acceptConnection(conn));
 
@@ -173,6 +178,16 @@ export class PeerHostTransport implements HostTransport {
     }, 250);
   }
 
+  /**
+   * A phone found this table through the signalling server, but the direct
+   * WebRTC link never opened. Almost always a network that blocks
+   * peer-to-peer traffic (phone hotspot, guest/office Wi-Fi) → needs TURN.
+   */
+  onLinkFailure(handler: () => void): Unsubscribe {
+    this.linkFailureHandlers.add(handler);
+    return () => this.linkFailureHandlers.delete(handler);
+  }
+
   // ─── Internals ──────────────────────────────────────────────────────────────
 
   private connKey(conn: DataConnectionLike): string {
@@ -186,9 +201,28 @@ export class PeerHostTransport implements HostTransport {
     }
     const key = this.connKey(conn);
 
+    // Until 'open', the phone has only reached us via signalling. If ICE
+    // can't find a working path, the link stalls or errors before opening.
+    let opened = false;
+    let reported = false;
+    const reportLinkFailure = () => {
+      if (opened || reported || this.destroyed) return;
+      reported = true;
+      for (const h of this.linkFailureHandlers) h();
+    };
+    const stallTimer = setTimeout(reportLinkFailure, this.stallMs);
+
     conn.on('open', () => {
+      opened = true;
+      clearTimeout(stallTimer);
       this.conns.set(key, { conn, lastSeen: Date.now(), invalidFrames: 0 });
       for (const h of this.connectHandlers) h(key);
+    });
+    conn.on('error', () => {
+      if (!opened) {
+        clearTimeout(stallTimer);
+        reportLinkFailure();
+      }
     });
 
     conn.on('data', (raw) => {

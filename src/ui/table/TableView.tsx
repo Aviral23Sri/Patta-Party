@@ -29,7 +29,13 @@ export function TableView({ hostController, joinUrl, lobbyNotice }: TableViewPro
     return hostController.subscribePublicState(setState);
   }, [hostController]);
 
-  const showScoreboard = state.phase === 'bidding' || state.phase === 'playing';
+  // Keep the felt up while the final trick of a round is still on display,
+  // so nobody misses the last card before the summary appears.
+  const revealingLastTrick =
+    !!state.lastCompletedTrick && (state.phase === 'round_summary' || state.phase === 'game_over');
+  const showGameplay =
+    state.phase === 'bidding' || state.phase === 'playing' || state.phase === 'dealing' || revealingLastTrick;
+  const showScoreboard = showGameplay;
 
   return (
     <div className="flex flex-col h-full bg-slate-950 overflow-hidden">
@@ -51,13 +57,13 @@ export function TableView({ hostController, joinUrl, lobbyNotice }: TableViewPro
             </PhaseWrapper>
           )}
 
-          {(state.phase === 'bidding' || state.phase === 'playing' || state.phase === 'dealing') && (
+          {showGameplay && (
             <PhaseWrapper key="gameplay">
               <TableGameplay state={state} />
             </PhaseWrapper>
           )}
 
-          {state.phase === 'round_summary' && (
+          {state.phase === 'round_summary' && !revealingLastTrick && (
             <PhaseWrapper key="summary">
               <div className="flex-1 flex flex-col h-full felt-table overflow-hidden">
                 <TableRoundSummary
@@ -68,7 +74,7 @@ export function TableView({ hostController, joinUrl, lobbyNotice }: TableViewPro
             </PhaseWrapper>
           )}
 
-          {state.phase === 'game_over' && (
+          {state.phase === 'game_over' && !revealingLastTrick && (
             <PhaseWrapper key="gameover">
               <div className="flex-1 flex flex-col h-full felt-table overflow-hidden">
                 <TableLeaderboard

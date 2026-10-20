@@ -10,6 +10,7 @@ import { motion } from 'framer-motion';
 import { HostController } from '../../net/host';
 import { PeerHostTransport, type HostSignalStatus } from '../../net/peerHostTransport';
 import { buildJoinUrl } from '../../net/roomCode';
+import { hasTurnServer } from '../../net/peerConfig';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { TableView } from './TableView';
 
@@ -31,6 +32,9 @@ export function TableHostPage({ onHome }: { onHome: () => void }) {
   const [setup, setSetup] = useState<Setup>({ status: 'starting' });
   const [attempt, setAttempt] = useState(0);
   const [signal, setSignal] = useState<HostSignalStatus>('online');
+  /** Phones that reached us via signalling but never got a direct link. */
+  const [linkFailures, setLinkFailures] = useState(0);
+  const [linkNoticeDismissed, setLinkNoticeDismissed] = useState(0);
   const wake = useWakeLock(true);
 
   useEffect(() => {
@@ -47,7 +51,9 @@ export function TableHostPage({ onHome }: { onHome: () => void }) {
         }
         transport = t;
         controller = new HostController(t, {}, { roomCode: t.roomCode });
-        offSignal = t.onSignalStatus(setSignal);
+        const offStatus = t.onSignalStatus(setSignal);
+        const offLink = t.onLinkFailure(() => setLinkFailures((n) => n + 1));
+        offSignal = () => { offStatus(); offLink(); };
         setSetup({ status: 'ready', transport: t, controller });
       })
       .catch((err: unknown) => {
@@ -137,6 +143,33 @@ export function TableHostPage({ onHome }: { onHome: () => void }) {
           </>
         }
       />
+      {linkFailures > linkNoticeDismissed && (
+        <div
+          role="alert"
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-50 w-[min(92%,560px)] rounded-xl
+            border border-amber-400/50 bg-slate-900/95 px-4 py-3 text-xs text-amber-100 shadow-2xl"
+        >
+          <div className="flex items-start gap-3">
+            <div className="flex-1">
+              <p className="font-bold text-amber-300 mb-1">
+                ⚠ A phone found this table but couldn't connect directly
+              </p>
+              <p className="text-amber-100/80">
+                This network blocks device-to-device links. It's common when this computer uses a
+                phone's hotspot and that same phone tries to join, or on guest/office Wi-Fi.
+                {hasTurnServer()
+                  ? ' A TURN relay is configured; check its credentials and that it is reachable.'
+                  : ' Fix: put the table and all phones on the same normal Wi-Fi (or a hotspot from a phone that isn\'t playing), or add a TURN relay (see README → TURN).'}
+              </p>
+            </div>
+            <button
+              onClick={() => setLinkNoticeDismissed(linkFailures)}
+              aria-label="Dismiss"
+              className="text-amber-200/60 hover:text-amber-100 text-base leading-none"
+            >✕</button>
+          </div>
+        </div>
+      )}
       {signal === 'reconnecting' && (
         <div
           role="status"

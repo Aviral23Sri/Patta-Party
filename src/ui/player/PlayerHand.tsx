@@ -1,9 +1,12 @@
 /**
- * PlayerHand – the scrollable card fan at the bottom of the phone screen.
- * Tap to select, swipe up or press Play to throw.
+ * PlayerHand – the player's cards as an overlapping fan that always fits the
+ * screen width (no sideways scrolling, so the whole hand is visible while
+ * bidding and playing).
+ *
+ * To play: swipe a card up, or tap it twice (first tap lifts it).
  */
-import { useState, useRef } from 'react';
-import { motion, AnimatePresence, useAnimation } from 'framer-motion';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { motion, type PanInfo } from 'framer-motion';
 import { CardDisplay } from '../components/CardDisplay';
 import type { Card } from '../../engine/types';
 import { sortHand } from '../../engine/deck';
@@ -11,123 +14,127 @@ import { sortHand } from '../../engine/deck';
 interface PlayerHandProps {
   hand: Card[];
   legalCards: Card[];
+  /** True only when this player may play right now. */
   isMyTurn: boolean;
   onPlay: (card: Card) => void;
 }
 
-function sorted(hand: Card[]): Card[] {
-  return sortHand(hand);
-}
+const CARD_W = 70; // matches CardDisplay size="md"
+const CARD_H = 100;
+const SIDE_PAD = 12;
+const LIFT = 18; // px a selected card rises
+const SWIPE_DISTANCE = 55; // px upwards that counts as a throw
+const SWIPE_VELOCITY = 450; // px/s upwards that counts as a flick
+
+const SUIT_SYMBOL: Record<Card['suit'], string> = { S: '♠', H: '♥', D: '♦', C: '♣' };
 
 export function PlayerHand({ hand, legalCards, isMyTurn, onPlay }: PlayerHandProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const controls = useAnimation();
-  const dragStartY = useRef(0);
+  const [width, setWidth] = useState(360);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Track the available width so the fan always fits.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setWidth(el.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const legalIds = new Set(legalCards.map((c) => c.id));
-  const sortedHand = sorted(hand);
-  const selected = sortedHand.find((c) => c.id === selectedId) ?? null;
+  const sortedHand = sortHand(hand);
+  const n = sortedHand.length;
+  // Spread cards evenly; never wider apart than a small gap.
+  const step = n > 1 ? Math.min(CARD_W + 6, (width - SIDE_PAD * 2 - CARD_W) / (n - 1)) : 0;
+  const fanWidth = n > 0 ? CARD_W + step * (n - 1) : 0;
+  const offsetX = Math.max(SIDE_PAD, (width - fanWidth) / 2);
 
-  function handleCardTap(card: Card) {
-    if (!isMyTurn) return;
-    if (!legalIds.has(card.id)) return;
+  // A selection only makes sense while it's our turn and the card is still playable.
+  const selected = isMyTurn && selectedId && legalIds.has(selectedId)
+    ? sortedHand.find((c) => c.id === selectedId) ?? null
+    : null;
 
-    if (selectedId === card.id) {
-      // Second tap = play immediately
-      playCard(card);
-    } else {
-      setSelectedId(card.id);
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(30);
-      }
-    }
-  }
-
-  function playCard(card: Card) {
+  function play(card: Card) {
     setSelectedId(null);
+    if (navigator.vibrate) navigator.vibrate(25);
     onPlay(card);
   }
 
+  function handleTap(card: Card) {
+    if (!isMyTurn || !legalIds.has(card.id)) return;
+    if (selected?.id === card.id) {
+      play(card);
+    } else {
+      setSelectedId(card.id);
+      if (navigator.vibrate) navigator.vibrate(15);
+    }
+  }
+
+  function handleDragEnd(card: Card, info: PanInfo) {
+    if (info.offset.y < -SWIPE_DISTANCE || info.velocity.y < -SWIPE_VELOCITY) {
+      play(card);
+    }
+  }
+
+  const hint = !isMyTurn
+    ? null
+    : selected
+      ? `Swipe up or tap ${selected.rank}${SUIT_SYMBOL[selected.suit]} again to play`
+      : 'Your turn: swipe a card up to play';
+
   return (
-    <div className="flex flex-col gap-2">
-      {/* Play button (shown when a card is selected) */}
-      <AnimatePresence>
-        {selected && isMyTurn && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            className="flex items-center justify-center gap-3 px-4"
-          >
-            <button
-              onClick={() => setSelectedId(null)}
-              className="px-4 py-2 rounded-xl bg-white/10 text-white/60 text-sm font-medium"
-            >
-              Cancel
-            </button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => playCard(selected)}
-              className="flex-1 py-2.5 rounded-2xl font-bold text-sm
-                bg-gradient-to-r from-green-500 to-emerald-600 text-white
-                shadow-lg shadow-green-500/30 cursor-pointer"
-            >
-              ▲ Play {selected.rank}{selected.suit === 'S' ? '♠' : selected.suit === 'H' ? '♥' : selected.suit === 'D' ? '♦' : '♣'}
-            </motion.button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="flex flex-col">
+      {/* Fixed-height hint row, so nothing jumps or overlaps the cards */}
+      <div className="h-5 text-center text-xs font-semibold text-green-300/90">
+        {hint}
+      </div>
 
-      {/* Cards */}
-      <div className="hand-scroll px-4 pb-2 pt-1">
-        <div className="flex gap-1.5 w-max">
-          {sortedHand.map((card) => {
-            const isLegal = legalIds.has(card.id);
-            const isSelected = selectedId === card.id;
-            const isSuited = card.suit === 'S' ? 'border-amber-400' : '';
+      <div
+        ref={containerRef}
+        className="relative w-full"
+        style={{ height: CARD_H + LIFT + 8 }}
+      >
+        {sortedHand.map((card, i) => {
+          const isLegal = legalIds.has(card.id);
+          const isSelected = selected?.id === card.id;
+          const canDrag = isMyTurn && isLegal;
 
-            return (
+          return (
+            // Outer: position in the fan + lift when selected.
+            <motion.div
+              key={card.id}
+              className="absolute"
+              style={{ left: offsetX + i * step, bottom: 4, zIndex: isSelected ? 40 : i + 1 }}
+              animate={{ y: isSelected ? -LIFT : isMyTurn && isLegal ? -4 : 0 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+            >
+              {/* Inner: the draggable card, snaps back unless thrown. */}
               <motion.div
-                key={card.id}
-                animate={{
-                  y: isSelected ? -20 : 0,
-                  scale: isSelected ? 1.05 : 1,
-                }}
-                transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                drag={isSelected && isMyTurn ? 'y' : false}
-                dragConstraints={{ top: -160, bottom: 0 }}
-                dragElastic={0.4}
-                onDragStart={() => { dragStartY.current = 0; }}
-                onDragEnd={(_, info) => {
-                  if (info.offset.y < -70 && selected) {
-                    playCard(selected);
-                  } else {
-                    controls.start({ y: -20 });
-                  }
-                }}
-                style={{ touchAction: 'pan-x' }}
-                className={isSuited}
+                drag={canDrag ? 'y' : false}
+                dragSnapToOrigin
+                dragConstraints={{ top: -240, bottom: 0 }}
+                dragElastic={{ top: 0.6, bottom: 0 }}
+                whileDrag={{ scale: 1.08, zIndex: 50 }}
+                onDragEnd={(_, info) => handleDragEnd(card, info)}
+                onTap={() => handleTap(card)}
+                style={{ touchAction: canDrag ? 'none' : 'auto' }}
+                aria-label={`${card.rank}${SUIT_SYMBOL[card.suit]}${canDrag ? ', playable' : ''}`}
+                role={canDrag ? 'button' : undefined}
               >
                 <CardDisplay
                   card={card}
                   size="md"
                   isLegal={isMyTurn ? isLegal : true}
                   isSelected={isSelected}
-                  onClick={() => handleCardTap(card)}
                 />
               </motion.div>
-            );
-          })}
-        </div>
+            </motion.div>
+          );
+        })}
       </div>
-
-      {/* Swipe hint */}
-      {selected && isMyTurn && (
-        <p className="text-center text-white/30 text-xs pb-1">
-          Swipe ↑ or tap Play to throw
-        </p>
-      )}
     </div>
   );
 }

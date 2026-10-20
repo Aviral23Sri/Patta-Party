@@ -41,6 +41,9 @@ function generateToken(): string {
   return Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
 }
 
+/** How long a completed trick stays on screen before it's swept away (ms). */
+export const TRICK_REVEAL_MS = 2800;
+
 export interface HostControllerOptions {
   /** Use this room code (e.g. the one PeerHostTransport reserved). */
   roomCode?: string;
@@ -316,20 +319,14 @@ export class HostController {
         const winnerSeat = this.seats[winnerId];
         const winnerName = winnerSeat?.name ?? `Player ${winnerId + 1}`;
 
+        // Everyone gets to see the full trick (including the last card) before
+        // it is swept away. Phones hold off playing while this is set.
         this.lastCompletedTrick = { trick: completedTrick, winnerId, winnerName };
-
-        // Vibrate for winner
-        this.sendToSeat(winnerId, {
-          type: 'PUBLIC_STATE',
-          state: this.buildPublicState(),
-        });
-
-        // Clear after 2.5 s
         if (this.lastCompletedTrickTimer) clearTimeout(this.lastCompletedTrickTimer);
         this.lastCompletedTrickTimer = setTimeout(() => {
           this.lastCompletedTrick = null;
           this.broadcastAll();
-        }, 2500);
+        }, TRICK_REVEAL_MS);
       }
 
       this.broadcastAll();

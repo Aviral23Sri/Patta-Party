@@ -61,6 +61,36 @@ Troubleshooting:
   "keep this screen on manually" hint, and copying falls back to a prompt. Over `https` (any
   deployment) both work.
 
+## Test over a tunnel (HTTPS, any network, before deploying)
+
+A tunnel gives your local dev server a public `https://` URL. Phones don't need to be on your
+Wi-Fi, and because it's HTTPS, Wake Lock and the Clipboard API work just as they will in production.
+`vite.config.ts` already allows the common tunnel domains (`server.allowedHosts`).
+
+**VS Code port forwarding (Dev Tunnels)**
+
+1. `npm run dev`
+2. In VS Code open the **Ports** panel (next to Terminal) → **Forward a Port** → `5173`.
+3. Right-click the port → **Port Visibility → Public**. Otherwise every phone has to sign in to
+   GitHub/Microsoft first.
+4. Open the forwarded URL + `/table` (e.g. `https://abc123-5173.inc1.devtunnels.ms/table`) on the
+   table device. The QR code and join link automatically use that tunnel URL.
+
+**Alternatives** (no VS Code needed):
+
+```bash
+npx cloudflared tunnel --url http://localhost:5173   # prints https://<random>.trycloudflare.com
+ngrok http 5173                                      # needs a free ngrok account
+```
+
+To test the production build instead of the dev server: `npm run build && npm run preview`, then
+tunnel port `4173`.
+
+Notes: the tunnel only carries the web page. Gameplay traffic is WebRTC, which goes directly
+between devices or through STUN/TURN, so a tunnel doesn't remove the TURN requirement on strict
+networks. The tunnel URL changes each time unless you make it persistent. Stop forwarding when you're done:
+a public port is reachable by anyone who has the link.
+
 ---
 
 ## Routes
@@ -110,10 +140,32 @@ Troubleshooting:
   sanitised copy. The host ignores everything except `JOIN` from a connection that hasn't joined,
   and closes connections that keep sending garbage. Seat tokens are 96-bit random values.
 
+### "Connecting…" never finishes / "couldn't connect directly"
+
+Loading the page and *finding* the table both go through servers (your tunnel or host, and
+the PeerJS signalling server). The game link itself is **direct device-to-device WebRTC**. If the
+network can't carry a direct link, the phone shows *"Found the table but couldn't connect to it
+directly"* after about 45 s, and the table shows a ⚠ banner.
+
+The most common trap is **the laptop using a phone's hotspot while that same phone plays**.
+Android doesn't offer the hotspot interface to WebRTC, so the phone can only use mobile data. The
+laptop sits behind that same phone and the carrier's NAT, and the two can't reach each other.
+Fixes, easiest first:
+
+1. Put the table and all phones on the **same normal Wi-Fi router**.
+2. Use a hotspot from a phone (or device) that **isn't** playing. Other phones on that hotspot
+   connect fine.
+3. Add a **TURN relay** (below). This works on any network, including the hotspot case.
+
 ### Strict networks (TURN)
 
 Public STUN servers (Google, Cloudflare) are configured by default. That covers the same Wi-Fi and
-most home routers. Corporate Wi-Fi, some mobile carriers and symmetric NATs need a **TURN relay**.
+most home routers. A phone's own hotspot, corporate Wi-Fi, some mobile carriers and symmetric NATs
+need a **TURN relay**, which forwards the (tiny) game traffic when a direct link is impossible.
+
+Free option: create a free account at [Metered](https://www.metered.ca/stun-turn) (free monthly
+quota, which is plenty for card games) and open your TURN app's credentials page. It lists the
+URLs, username and credential.
 Copy `.env.example` to `.env.local` (or set the variables on your host) and fill in:
 
 ```bash
@@ -121,6 +173,11 @@ VITE_TURN_URLS=turn:turn.example.com:3478,turns:turn.example.com:5349
 VITE_TURN_USERNAME=...
 VITE_TURN_CREDENTIAL=...
 ```
+
+Include the TCP/443 variants your provider lists (e.g. `turn:…:443?transport=tcp`,
+`turns:…:443?transport=tcp`): they get through the strictest firewalls. **Restart `npm run dev`**
+after editing `.env.local`, because Vite reads env files only at startup. For a deployed site, add the same
+variables in Vercel/Netlify and redeploy.
 
 The config is built in `src/net/peerConfig.ts`. You can also point at your own PeerJS
 signalling server with `VITE_PEER_HOST` / `VITE_PEER_PORT` / `VITE_PEER_PATH` / `VITE_PEER_SECURE`.

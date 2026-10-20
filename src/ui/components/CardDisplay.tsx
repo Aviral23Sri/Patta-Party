@@ -23,7 +23,7 @@ const SUIT_COLOR: Record<string, string> = {
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
-export type CardSize = 'xs' | 'sm' | 'md' | 'lg';
+export type CardSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 
 interface CardDisplayProps {
   card: Card;
@@ -42,6 +42,7 @@ const SIZE_CONFIG: Record<CardSize, { w: number; h: number; rank: number; suit: 
   sm:  { w: 52,  h: 74,  rank: 12, suit: 20, corner: 7  },
   md:  { w: 70,  h: 100, rank: 14, suit: 26, corner: 9  },
   lg:  { w: 90,  h: 126, rank: 16, suit: 32, corner: 11 },
+  xl:  { w: 116, h: 162, rank: 22, suit: 46, corner: 13 },
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────

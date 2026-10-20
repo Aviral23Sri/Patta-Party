@@ -44,6 +44,13 @@ export function buildIceServers(env: Env = import.meta.env): RTCIceServer[] {
   return servers;
 }
 
+/** True when a TURN relay is configured (VITE_TURN_URLS). */
+export function hasTurnServer(env: Env = import.meta.env): boolean {
+  return buildIceServers(env).some((s) =>
+    (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => u.startsWith('turn')),
+  );
+}
+
 export function buildPeerOptions(env: Env = import.meta.env): PeerOptions {
   const options: PeerOptions = {
     config: { iceServers: buildIceServers(env) },

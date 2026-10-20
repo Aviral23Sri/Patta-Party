@@ -164,6 +164,40 @@ describe('PeerClientTransport lifecycle', () => {
     client.disconnect();
   });
 
+  it('gives up quickly with "unreachable" when the table is found but no link opens', async () => {
+    const host = await createHost({ generateCode: () => 'ROOM' });
+    const linkFailures: number[] = [];
+    host.onLinkFailure(() => linkFailures.push(Date.now()));
+    net.blockLinks = true;
+
+    const { client, statuses } = connectClient('ROOM');
+    await tick(60_000);
+
+    expect(statuses).toEqual(['connecting', 'unreachable']);
+    expect(statuses).not.toContain('host_lost');
+    // The table saw each stalled attempt (default: 1 + 3 retries).
+    expect(linkFailures).toHaveLength(4);
+
+    // Once the network allows it, "Try again" works.
+    net.blockLinks = false;
+    client.retry();
+    await tick(100);
+    expect(statuses.at(-1)).toBe('connected');
+    client.disconnect();
+    host.destroy();
+  });
+
+  it('does not report a link failure for a phone that connects normally', async () => {
+    const host = await createHost({ generateCode: () => 'ROOM' });
+    const linkFailures: number[] = [];
+    host.onLinkFailure(() => linkFailures.push(1));
+    const { client } = connectClient('ROOM');
+    await tick(60_000);
+    expect(linkFailures).toEqual([]);
+    client.disconnect();
+    host.destroy();
+  });
+
   it('reconnects after the connection closes', async () => {
     const host = await createHost({ generateCode: () => 'ROOM' });
     const { client, statuses } = connectClient('ROOM');

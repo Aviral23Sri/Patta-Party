@@ -17,9 +17,24 @@ function lanIPs(): string[] {
     .sort((a, b) => rank(a) - rank(b))
 }
 
+/**
+ * Tunnel domains allowed to reach the dev/preview server, so phones can test
+ * over HTTPS before deploying. Vite rejects unknown Host headers by default
+ * (DNS-rebinding protection); a leading dot allows any subdomain.
+ */
+const TUNNEL_HOSTS = [
+  '.devtunnels.ms', // VS Code port forwarding / Dev Tunnels
+  '.trycloudflare.com', // cloudflared quick tunnels
+  '.ngrok-free.app', // ngrok
+  '.ngrok.app',
+  '.loca.lt', // localtunnel
+]
+
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
+  server: { allowedHosts: TUNNEL_HOSTS },
+  preview: { allowedHosts: TUNNEL_HOSTS },
   define: {
     __LAN_IPS__: JSON.stringify(command === 'serve' ? lanIPs() : []),
   },

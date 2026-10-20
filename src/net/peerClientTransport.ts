@@ -37,6 +37,12 @@ export interface PeerClientOptions {
   connectTimeoutMs?: number;
   /** Give up (host_lost) after this many consecutive failed attempts. */
   maxRetries?: number;
+  /**
+   * Before the first successful connection, give up (unreachable) after this
+   * many failed attempts. The table was found but no direct link came up, so
+   * waiting minutes won't help; tell the player quickly instead.
+   */
+  firstConnectRetries?: number;
   /** After having connected, this many "peer-unavailable" errors → host_lost. */
   unavailableLimit?: number;
   /** Delay before retry number `attempt` (1-based). */
@@ -56,6 +62,7 @@ export class PeerClientTransport implements ClientTransport {
   private readonly timeoutMs: number;
   private readonly connectTimeoutMs: number;
   private readonly maxRetries: number;
+  private readonly firstConnectRetries: number;
   private readonly unavailableLimit: number;
   private readonly retryDelay: (attempt: number) => number;
 
@@ -98,6 +105,7 @@ export class PeerClientTransport implements ClientTransport {
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
     this.maxRetries = options.maxRetries ?? 15;
+    this.firstConnectRetries = options.firstConnectRetries ?? 3;
     this.unavailableLimit = options.unavailableLimit ?? 3;
     this.retryDelay = options.retryDelay ?? defaultRetryDelay;
 
@@ -139,7 +147,7 @@ export class PeerClientTransport implements ClientTransport {
     this.peer = null;
   }
 
-  /** Manual retry after `host_lost` / `not_found` (e.g. a "Try again" button). */
+  /** Manual retry after `host_lost` / `not_found` / `unreachable` (e.g. a "Try again" button). */
   retry(): void {
     if (this.closed) return;
     this.failures = 0;
@@ -237,7 +245,7 @@ export class PeerClientTransport implements ClientTransport {
 
   private fail(id: number, kind: FailureKind): void {
     if (this.closed || id !== this.attemptId) return;
-    if (this.status === 'not_found' || this.status === 'host_lost') return;
+    if (this.status === 'not_found' || this.status === 'host_lost' || this.status === 'unreachable') return;
 
     // Invalidate this attempt so its other callbacks become no-ops.
     this.attemptId++;
@@ -259,6 +267,10 @@ export class PeerClientTransport implements ClientTransport {
     }
 
     this.failures++;
+    if (!this.everConnected && this.failures > this.firstConnectRetries) {
+      this.setStatus('unreachable');
+      return;
+    }
     if (this.failures > this.maxRetries) {
       this.setStatus('host_lost');
       return;

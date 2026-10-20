@@ -113,6 +113,8 @@ export class MockPeer extends Emitter implements PeerLike {
       remote.other = local;
       host.conns.add(remote);
       host.emit('connection', remote);
+      // ICE can't find a path (hotspot / strict NAT): signalling works, link never opens.
+      if (this.net.blockLinks) return;
       later(() => {
         remote.markOpen();
         local.markOpen();
@@ -141,6 +143,8 @@ export class MockPeerNetwork {
   /** IDs "owned by someone else" on the signalling server. */
   readonly takenIds = new Set<string>();
   seq = 0;
+  /** When true, data connections reach the host but never open (no ICE path). */
+  blockLinks = false;
   private anon = 0;
   readonly created: MockPeer[] = [];
 

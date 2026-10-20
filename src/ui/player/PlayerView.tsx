@@ -47,6 +47,12 @@ interface PlayerViewProps {
 
 type Toast = { text: string; tone: 'good' | 'warn' };
 
+const UNREACHABLE_MESSAGE =
+  "Found the table but couldn't connect to it directly. This network blocks device-to-device " +
+  "links. Common causes: this phone is the table's hotspot, or guest/office Wi-Fi. Put the " +
+  'table and phones on the same normal Wi-Fi (or a hotspot from a different phone), or set up ' +
+  'a TURN server (see README).';
+
 function readToken(key?: string): string | undefined {
   if (!key) return undefined;
   try {
@@ -133,7 +139,7 @@ export function PlayerView({
               newWon > prevTricksWon.current &&
               msg.state.lastCompletedTrick?.winnerId === seat
             ) {
-              showToast('🎉 You won the hand!');
+              // The status line announces it; a buzz tells you without looking.
               if (navigator.vibrate) navigator.vibrate([80, 30, 80]);
             }
             prevTricksWon.current = newWon;
@@ -166,6 +172,8 @@ export function PlayerView({
         transport.send({ type: 'JOIN', name: nameRef.current, token: tokenRef.current });
       } else if (s === 'not_found') {
         onJoinFailedRef.current?.('Table not found. Check the room code.');
+      } else if (s === 'unreachable') {
+        onJoinFailedRef.current?.(UNREACHABLE_MESSAGE);
       }
     });
 
@@ -178,6 +186,14 @@ export function PlayerView({
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
+
+  // After ~12 s of "Connecting…", explain the likely cause instead of just spinning.
+  const [slowConnect, setSlowConnect] = useState(false);
+  useEffect(() => {
+    if (joined) return;
+    const t = setTimeout(() => setSlowConnect(true), 12_000);
+    return () => clearTimeout(t);
+  }, [joined, transport]);
 
   const hostLost = hostDisconnected || status === 'host_lost';
   const inGame = joined && !!pub && pub.phase !== 'lobby' && pub.phase !== 'game_over';
@@ -270,6 +286,12 @@ export function PlayerView({
         <CenteredMessage icon="♠" spin title={status === 'connected' ? 'Joining table…' : 'Connecting…'}>
           <p className="text-white/40 text-sm">{name}</p>
           <LoadingDots />
+          {slowConnect && status === 'connecting' && (
+            <p className="mt-4 max-w-xs text-xs text-amber-300/80">
+              Found the table, still trying to open a direct link to it. If this phone is the
+              table's Wi-Fi hotspot, or you're on guest/office Wi-Fi, this may not work.
+            </p>
+          )}
           {onLeave && (
             <button onClick={onLeave} className="mt-6 text-white/40 text-sm hover:text-white/70">
               Cancel
@@ -292,13 +314,39 @@ export function PlayerView({
     }
 
     // ─── Game over / round summary ───────────────────────────────────────────
-    if (pub.phase === 'game_over' || pub.phase === 'round_summary') {
-      const myScore = pub.totalScores[(priv?.seat ?? seatRef.current ?? 0) as PlayerId];
+    // (Held back while the final trick is still on display.)
+    if ((pub.phase === 'game_over' || pub.phase === 'round_summary') && !pub.lastCompletedTrick) {
+      const mySeat = (priv?.seat ?? seatRef.current ?? 0) as PlayerId;
+      const myScore = pub.totalScores[mySeat];
+      const lastRound = pub.roundSummaries.at(-1)?.scores.find((s) => s.playerId === mySeat);
+      const place = 1 + ([0, 1, 2, 3] as PlayerId[])
+        .filter((p) => pub.totalScores[p] > myScore).length;
+      const gameOver = pub.phase === 'game_over';
       return (
-        <CenteredMessage icon={pub.phase === 'game_over' ? '🏁' : '⏱️'} title={pub.phase === 'game_over' ? 'Game Over!' : 'Round Done'}>
-          <p className="text-white/50 text-sm mb-4">Waiting for the table…</p>
+        <CenteredMessage
+          icon={gameOver ? (place === 1 ? '🏆' : '🏁') : '⏱️'}
+          title={gameOver ? (place === 1 ? 'You win!' : `Game over · #${place}`) : `Round ${pub.roundNumber} done`}
+        >
+          <p className="text-white/50 text-sm mb-4">
+            {gameOver ? 'Final scores are on the table.' : 'Waiting for the table to start the next round…'}
+          </p>
+          {lastRound && (
+            <div className={`mb-3 w-full max-w-xs rounded-2xl px-4 py-3 border text-sm
+              ${lastRound.result.kind === 'success'
+                ? 'border-green-400/30 bg-green-500/10 text-green-200'
+                : 'border-red-400/30 bg-red-500/10 text-red-200'}`}
+            >
+              <div className="font-bold mb-0.5">
+                {lastRound.result.kind === 'success' ? '✅ Made your bid' : '❌ Lakdi'}
+              </div>
+              <div className="text-xs opacity-80 tabular-nums">
+                Bid {lastRound.bid} · Won {lastRound.tricksWon} · {lastRound.result.score > 0 ? '+' : ''}
+                {lastRound.result.score.toFixed(1)} this round
+              </div>
+            </div>
+          )}
           <div className="bg-white/5 border border-white/10 rounded-2xl px-6 py-4 w-full max-w-xs">
-            <div className="text-white/40 text-xs mb-1">Your Score</div>
+            <div className="text-white/40 text-xs mb-1">Your total · #{place} of 4</div>
             <div className={`text-4xl font-black ${myScore >= 0 ? 'text-amber-400' : 'text-red-400'}`}>
               {myScore > 0 ? '+' : ''}{myScore.toFixed(1)}
             </div>
@@ -357,6 +405,9 @@ function LoadingDots() {
 
 // ─── Main game screen ─────────────────────────────────────────────────────────
 
+const SUIT_SYMBOL: Record<string, string> = { S: '♠', H: '♥', D: '♦', C: '♣' };
+const SUIT_NAME: Record<string, string> = { S: 'Spades', H: 'Hearts', D: 'Diamonds', C: 'Clubs' };
+
 function GameScreen({ priv, pub, playerName, onBid, onPlay }: {
   priv: PrivatePlayerState | null;
   pub: PublicGameState;
@@ -372,117 +423,173 @@ function GameScreen({ priv, pub, playerName, onBid, onPlay }: {
   const myBid = pub.bids[mySeat];
   const myWon = pub.tricksWon[mySeat] ?? 0;
   const myName = pub.seats[mySeat]?.name ?? playerName;
+  const total = pub.totalScores[mySeat] ?? 0;
 
-  // Current trick: what's been played so far
-  const trickPlays = pub.currentTrick.plays;
+  // While a finished trick is on display, show it (with its winner) and hold
+  // off playing, so everyone sees the last card before it's swept away.
+  const reveal = pub.lastCompletedTrick;
+  const trick = reveal ? reveal.trick : pub.currentTrick;
+  const winningIdx = trick.winningPlayIndex;
+  const canPlay = isMyTurn && !isBidding && pub.phase === 'playing' && !reveal;
+
+  const turnSeat = pub.currentTurn !== null ? pub.seats[pub.currentTurn] : null;
+  const nameOf = (id: PlayerId) => (id === mySeat ? 'You' : pub.seats[id]?.name ?? `P${id + 1}`);
 
   return (
     <div className="flex flex-col h-full bg-slate-950 overflow-hidden relative">
       {/* ── Header bar ────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-3 py-2 bg-slate-900 border-b border-white/10 flex-shrink-0">
-        <div className="text-xs text-white/60 font-medium">
-          {myName} <span className="text-amber-400/60">Rd {pub.roundNumber}/{pub.totalRounds}</span>
+        <div className="text-xs text-white/70 font-semibold truncate">
+          {myName} <span className="text-amber-400/70 font-normal">· Rd {pub.roundNumber}/{pub.totalRounds}</span>
         </div>
-        <div className="flex items-center gap-3 text-xs">
-          <span className="text-white/50">Bid: <span className="text-white font-bold">{myBid ?? '–'}</span></span>
-          <span className="text-white/50">Won: <span className="text-green-400 font-bold">{myWon}</span></span>
-          <span className="text-amber-400 font-bold tabular-nums">
-            {(pub.totalScores[mySeat] ?? 0) >= 0 ? '+' : ''}{(pub.totalScores[mySeat] ?? 0).toFixed(1)}
+        <div className="flex items-center gap-3 text-xs flex-shrink-0">
+          <span className="text-white/50">Bid <span className="text-white font-bold">{myBid ?? '–'}</span></span>
+          <span className="text-white/50">Won <span className="text-green-400 font-bold">{myWon}</span></span>
+          <span className={`font-bold tabular-nums ${total < 0 ? 'text-red-400' : 'text-amber-400'}`}>
+            {total > 0 ? '+' : ''}{total.toFixed(1)}
           </span>
         </div>
       </div>
 
-      {/* ── YOUR TURN banner ──────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {isMyTurn && !isBidding && (
-          <motion.div
-            key="yourturn"
-            initial={{ opacity: 0, scaleX: 0.8 }}
-            animate={{ opacity: 1, scaleX: 1 }}
-            exit={{ opacity: 0, scaleX: 0.8 }}
-            className="your-turn-banner mx-3 mt-2 py-2 rounded-xl
-              bg-gradient-to-r from-green-600 to-emerald-600 text-white
-              text-center text-sm font-black tracking-wide shadow-lg shadow-green-500/30 flex-shrink-0"
-          >
-            ★ YOUR TURN ★
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Current trick (mini view) ─────────────────────────────────────── */}
+      {/* ── Status line: whose turn / what's happening ─────────────────────── */}
       <div className="flex-shrink-0 mx-3 mt-2">
-        <p className="text-xs text-white/30 mb-1.5">Current trick</p>
-        <div className="flex gap-2 items-end min-h-[68px]">
-          {trickPlays.length === 0 ? (
-            <div className="text-white/20 text-xs italic">No cards played yet</div>
-          ) : (
-            trickPlays.map((play, idx) => {
-              const playerName = pub.seats[play.playerId]?.name ?? `P${play.playerId + 1}`;
-              const isWinning =
-                pub.currentTrick.winningPlayIndex !== null &&
-                pub.currentTrick.plays[pub.currentTrick.winningPlayIndex]?.playerId === play.playerId;
-              return (
-                <div key={idx} className="flex flex-col items-center gap-0.5">
-                  <motion.div
-                    initial={{ scale: 0.5, opacity: 0 }}
-                    animate={{ scale: isWinning ? 1.1 : 1, opacity: 1 }}
-                    className={isWinning ? 'ring-2 ring-yellow-400 rounded-lg' : ''}
-                  >
-                    <CardDisplay card={play.card} size="xs" />
-                  </motion.div>
-                  <span className="text-[9px] text-white/40 truncate max-w-[36px] text-center">
-                    {play.playerId === mySeat ? 'You' : playerName}
-                  </span>
-                </div>
-              );
-            })
-          )}
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={statusKey()}
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            transition={{ duration: 0.18 }}
+            className={`py-2 rounded-xl text-center text-sm font-bold ${statusClass()}`}
+          >
+            {statusText()}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
-      {/* ── Other players status ──────────────────────────────────────────── */}
-      <div className="flex gap-2 px-3 mt-2 flex-shrink-0 overflow-x-auto">
+      {/* ── Middle: bids during bidding, the trick during play ─────────────── */}
+      <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-3">
+        {pub.phase === 'bidding' ? (
+          <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
+            {pub.seats.map((seat, i) => seat && (
+              <div
+                key={i}
+                className={`rounded-lg px-3 py-1.5 text-xs flex justify-between
+                  ${pub.currentTurn === i ? 'bg-amber-500/20 ring-1 ring-amber-400' : 'bg-white/5'}`}
+              >
+                <span className="text-white/80 truncate">{nameOf(i as PlayerId)}</span>
+                <span className="font-bold text-white tabular-nums">
+                  {pub.bids[i as PlayerId] ?? '…'}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-2 items-end justify-center min-h-[96px]">
+              {trick.plays.length === 0 ? (
+                <div className="text-white/25 text-xs italic">No cards played yet</div>
+              ) : (
+                trick.plays.map((play, idx) => {
+                  const isWinning = winningIdx === idx;
+                  return (
+                    <div key={play.card.id} className="flex flex-col items-center gap-1">
+                      <motion.div
+                        initial={{ scale: 0.5, opacity: 0, y: -10 }}
+                        animate={{ scale: isWinning ? 1.08 : 1, opacity: 1, y: 0 }}
+                        transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+                        className={`rounded-[9px] ${isWinning ? 'ring-2 ring-yellow-400 shadow-lg shadow-yellow-400/30' : ''}`}
+                      >
+                        <CardDisplay card={play.card} size="sm" />
+                      </motion.div>
+                      <span className={`text-[10px] truncate max-w-[56px] ${isWinning ? 'text-yellow-300 font-bold' : 'text-white/50'}`}>
+                        {nameOf(play.playerId)}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            {trick.ledSuit && (
+              <p className="mt-2 text-[11px] text-white/40">
+                Led: <span className={trick.ledSuit === 'H' || trick.ledSuit === 'D' ? 'text-red-400' : 'text-white/80'}>
+                  {SUIT_SYMBOL[trick.ledSuit]} {SUIT_NAME[trick.ledSuit]}
+                </span>
+                {' · '}<span className="text-amber-300/80">♠ trumps</span>
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── Other players ──────────────────────────────────────────────────── */}
+      <div className="flex gap-2 px-3 pb-2 flex-shrink-0 justify-center">
         {pub.seats.map((seat, i) => {
           if (!seat || i === mySeat) return null;
-          const isTurn = pub.currentTurn === i;
+          const isTurn = pub.currentTurn === i && !reveal;
           const bid = pub.bids[i as PlayerId];
           const won = pub.tricksWon[i as PlayerId] ?? 0;
           return (
             <div
               key={i}
-              className={`flex-shrink-0 px-2 py-1 rounded-lg text-xs
+              className={`flex-1 min-w-0 px-2 py-1 rounded-lg text-xs text-center
                 ${isTurn ? 'bg-green-500/20 ring-1 ring-green-400' : 'bg-white/5'}`}
             >
-              <div className="font-semibold text-white/80 truncate max-w-[56px]">{seat.name}</div>
-              <div className="text-white/40">{won}/{bid ?? '?'}</div>
+              <div className="font-semibold text-white/80 truncate flex items-center justify-center gap-1">
+                {!seat.connected && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" title="Disconnected" />}
+                {seat.name}
+              </div>
+              <div className="text-white/40 tabular-nums">{won}/{bid ?? '?'}</div>
             </div>
           );
         })}
       </div>
 
-      {/* ── Spacer ─────────────────────────────────────────────────────────── */}
-      <div className="flex-1" />
+      {/* ── Bid panel (above the hand, so the cards stay visible) ───────────── */}
+      {isBidding && pub.phase === 'bidding' && (
+        <div className="flex-shrink-0 pb-2">
+          <BidPicker minBid={pub.rules.minBid} hand={myHand} onSubmit={onBid} />
+        </div>
+      )}
 
       {/* ── Hand ─────────────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 pb-3 border-t border-white/5 pt-2 bg-slate-950/80">
+      <div className="flex-shrink-0 pb-3 pt-1 border-t border-white/5 bg-slate-950/80">
         <PlayerHand
           hand={myHand}
           legalCards={legalCards}
-          isMyTurn={isMyTurn && !isBidding}
+          isMyTurn={canPlay}
           onPlay={onPlay}
         />
-        {myHand.length === 0 && pub.phase === 'playing' && (
-          <div className="text-center text-white/30 text-xs py-2">Waiting…</div>
-        )}
       </div>
-
-      {/* ── Bid picker overlay ────────────────────────────────────────────── */}
-      {isBidding && (
-        <BidPicker
-          minBid={pub.rules.minBid}
-          onSubmit={onBid}
-        />
-      )}
     </div>
   );
+
+  function statusKey(): string {
+    if (reveal) return `reveal-${reveal.winnerId}-${pub.roundNumber}`;
+    return `${pub.phase}-${pub.currentTurn}-${isMyTurn}`;
+  }
+
+  function statusText(): string {
+    if (reveal) {
+      return reveal.winnerId === mySeat ? '🎉 You win the hand!' : `🏆 ${reveal.winnerName} wins the hand`;
+    }
+    if (pub.phase === 'bidding') {
+      if (isBidding) return 'Your turn to bid: check your cards';
+      return turnSeat ? `Waiting for ${turnSeat.name} to bid…` : 'Bidding…';
+    }
+    if (canPlay) return '★ YOUR TURN ★';
+    if (turnSeat && !turnSeat.connected) return `${turnSeat.name} disconnected, waiting…`;
+    return turnSeat ? `Waiting for ${turnSeat.name}…` : '';
+  }
+
+  function statusClass(): string {
+    if (reveal) {
+      return reveal.winnerId === mySeat
+        ? 'bg-green-600 text-white shadow-lg shadow-green-500/30'
+        : 'bg-yellow-500/15 text-yellow-300 border border-yellow-400/30';
+    }
+    if (canPlay) return 'your-turn-banner bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg shadow-green-500/30';
+    if (isBidding) return 'bg-amber-500/20 text-amber-300 border border-amber-400/40';
+    return 'bg-white/5 text-white/50 font-medium';
+  }
 }

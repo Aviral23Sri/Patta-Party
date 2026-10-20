@@ -113,6 +113,8 @@ export interface HostTransport {
  *  - connected:    link to the host is up (send JOIN now)
  *  - reconnecting: link dropped after having been up; retrying
  *  - not_found:    the room code doesn't exist (never connected)
+ *  - unreachable:  the table exists but a direct link never came up
+ *                  (network blocks peer-to-peer; needs TURN)
  *  - host_lost:    gave up reconnecting; the host is gone
  */
 export type ConnectionStatus =
@@ -120,6 +122,7 @@ export type ConnectionStatus =
   | 'connected'
   | 'reconnecting'
   | 'not_found'
+  | 'unreachable'
   | 'host_lost';
 
 /**
