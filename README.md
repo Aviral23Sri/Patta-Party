@@ -2,6 +2,8 @@
 
 # Patta Party
 
+[![CI](https://github.com/Aviral23Sri/Patta-Party/actions/workflows/ci.yml/badge.svg)](https://github.com/Aviral23Sri/Patta-Party/actions/workflows/ci.yml)
+
 **Call Break for one table and four phones.**
 
 A local-multiplayer web app for the Indian card game **Call Break** (also called *Lakdi*; failing
