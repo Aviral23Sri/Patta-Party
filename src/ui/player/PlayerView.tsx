@@ -438,7 +438,7 @@ function GameScreen({ priv, pub, playerName, onBid, onPlay }: {
   return (
     <div className="flex flex-col h-full bg-slate-950 overflow-hidden relative">
       {/* ── Header bar ────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-3 py-2 bg-slate-900 border-b border-white/10 flex-shrink-0">
+      <div className="flex items-center justify-between px-3 py-2 short:py-1 bg-slate-900 border-b border-white/10 flex-shrink-0">
         <div className="text-xs text-white/70 font-semibold truncate">
           {myName} <span className="text-amber-400/70 font-normal">· Rd {pub.roundNumber}/{pub.totalRounds}</span>
         </div>
@@ -452,7 +452,7 @@ function GameScreen({ priv, pub, playerName, onBid, onPlay }: {
       </div>
 
       {/* ── Status line: whose turn / what's happening ─────────────────────── */}
-      <div className="flex-shrink-0 mx-3 mt-2">
+      <div className="flex-shrink-0 mx-3 mt-2 short:mt-1">
         <AnimatePresence mode="wait">
           <motion.div
             key={statusKey()}
@@ -460,33 +460,23 @@ function GameScreen({ priv, pub, playerName, onBid, onPlay }: {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 6 }}
             transition={{ duration: 0.18 }}
-            className={`py-2 rounded-xl text-center text-sm font-bold ${statusClass()}`}
+            className={`py-2 short:py-1 rounded-xl text-center text-sm short:text-xs font-bold ${statusClass()}`}
           >
             {statusText()}
           </motion.div>
         </AnimatePresence>
       </div>
 
-      {/* ── Middle: bids during bidding, the trick during play ─────────────── */}
-      <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-3">
+      {/* ── Middle: the trick during play (bids are shown on the player chips).
+          Flexible and clipped, so on short screens it gives way to the hand. */}
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col items-center justify-center px-3">
         {pub.phase === 'bidding' ? (
-          <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
-            {pub.seats.map((seat, i) => seat && (
-              <div
-                key={i}
-                className={`rounded-lg px-3 py-1.5 text-xs flex justify-between
-                  ${pub.currentTurn === i ? 'bg-amber-500/20 ring-1 ring-amber-400' : 'bg-white/5'}`}
-              >
-                <span className="text-white/80 truncate">{nameOf(i as PlayerId)}</span>
-                <span className="font-bold text-white tabular-nums">
-                  {pub.bids[i as PlayerId] ?? '…'}
-                </span>
-              </div>
-            ))}
-          </div>
+          <p className="text-white/30 text-xs text-center short:hidden">
+            Judge your bid from your hand below.
+          </p>
         ) : (
           <>
-            <div className="flex gap-2 items-end justify-center min-h-[96px]">
+            <div className="flex gap-2 items-end justify-center min-h-[96px] short:min-h-0">
               {trick.plays.length === 0 ? (
                 <div className="text-white/25 text-xs italic">No cards played yet</div>
               ) : (
@@ -511,7 +501,7 @@ function GameScreen({ priv, pub, playerName, onBid, onPlay }: {
               )}
             </div>
             {trick.ledSuit && (
-              <p className="mt-2 text-[11px] text-white/40">
+              <p className="mt-2 text-[11px] text-white/40 short:hidden">
                 Led: <span className={trick.ledSuit === 'H' || trick.ledSuit === 'D' ? 'text-red-400' : 'text-white/80'}>
                   {SUIT_SYMBOL[trick.ledSuit]} {SUIT_NAME[trick.ledSuit]}
                 </span>
@@ -523,7 +513,7 @@ function GameScreen({ priv, pub, playerName, onBid, onPlay }: {
       </div>
 
       {/* ── Other players ──────────────────────────────────────────────────── */}
-      <div className="flex gap-2 px-3 pb-2 flex-shrink-0 justify-center">
+      <div className="flex gap-2 px-3 pb-2 short:pb-1 flex-shrink-0 justify-center">
         {pub.seats.map((seat, i) => {
           if (!seat || i === mySeat) return null;
           const isTurn = pub.currentTurn === i && !reveal;
@@ -532,14 +522,19 @@ function GameScreen({ priv, pub, playerName, onBid, onPlay }: {
           return (
             <div
               key={i}
-              className={`flex-1 min-w-0 px-2 py-1 rounded-lg text-xs text-center
+              className={`flex-1 min-w-0 px-2 py-1 short:py-0.5 rounded-lg text-xs text-center
+                flex flex-col short:flex-row short:items-center short:justify-center short:gap-1.5
                 ${isTurn ? 'bg-green-500/20 ring-1 ring-green-400' : 'bg-white/5'}`}
             >
               <div className="font-semibold text-white/80 truncate flex items-center justify-center gap-1">
                 {!seat.connected && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" title="Disconnected" />}
                 {seat.name}
               </div>
-              <div className="text-white/40 tabular-nums">{won}/{bid ?? '?'}</div>
+              <div className="text-white/40 tabular-nums">
+                {pub.phase === 'bidding'
+                  ? (bid !== null ? <>bid <span className="text-white font-bold">{bid}</span></> : isTurn ? 'bidding…' : '…')
+                  : `${won}/${bid ?? '?'}`}
+              </div>
             </div>
           );
         })}
@@ -547,7 +542,7 @@ function GameScreen({ priv, pub, playerName, onBid, onPlay }: {
 
       {/* ── Bid panel (above the hand, so the cards stay visible) ───────────── */}
       {isBidding && pub.phase === 'bidding' && (
-        <div className="flex-shrink-0 pb-2">
+        <div className="flex-shrink-0 pb-2 short:pb-1">
           <BidPicker minBid={pub.rules.minBid} hand={myHand} onSubmit={onBid} />
         </div>
       )}

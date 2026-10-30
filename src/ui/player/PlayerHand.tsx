@@ -88,7 +88,7 @@ export function PlayerHand({ hand, legalCards, isMyTurn, onPlay }: PlayerHandPro
   return (
     <div className="flex flex-col">
       {/* Fixed-height hint row, so nothing jumps or overlaps the cards */}
-      <div className="h-5 text-center text-xs font-semibold text-green-300/90">
+      <div className="h-5 short:h-4 text-center text-xs short:text-[10px] font-semibold text-green-300/90">
         {hint}
       </div>
 

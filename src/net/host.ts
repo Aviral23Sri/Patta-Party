@@ -242,7 +242,7 @@ export class HostController {
     }
 
     const seat = emptyIdx as PlayerId;
-    this.seats[seat] = { id: seat, name: name.trim() || `Player ${seat + 1}`, connected: true };
+    this.seats[seat] = { id: seat, name: this.uniqueName(name.trim() || `Player ${seat + 1}`), connected: true };
     this.peerIdToSeat.set(peerId, seat);
 
     this.transport.sendToPlayer(peerId, {
@@ -356,6 +356,18 @@ export class HostController {
       for (let i = 0; i < 4; i++) {
         this.sendPrivateTo(i as PlayerId);
       }
+    }
+  }
+
+  /** "Asha" → "Asha 2" if another seat already uses the name (case-insensitive). */
+  private uniqueName(name: string): string {
+    const taken = new Set(
+      this.seats.filter((s): s is SeatInfo => s !== null).map((s) => s.name.toLowerCase()),
+    );
+    if (!taken.has(name.toLowerCase())) return name;
+    for (let n = 2; ; n++) {
+      const candidate = `${name} ${n}`;
+      if (!taken.has(candidate.toLowerCase())) return candidate;
     }
   }
 

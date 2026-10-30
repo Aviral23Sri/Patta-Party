@@ -128,6 +128,17 @@ describe('JOIN', () => {
     expect(sa2?.seat).toBe(0);
   });
 
+  it('numbers duplicate names so players can be told apart', async () => {
+    const { hub, transports } = setupHub(0);
+    transports[0].send({ type: 'JOIN', name: 'Mishthi' });
+    transports[1].send({ type: 'JOIN', name: 'mishthi' });
+    transports[2].send({ type: 'JOIN', name: 'Mishthi' });
+    await flush();
+    expect(hub.host.buildPublicState().seats.map((s) => s?.name)).toEqual([
+      'Mishthi', 'mishthi 2', 'Mishthi 3', undefined,
+    ]);
+  });
+
   it('re-confirms the same seat on a duplicate JOIN from a seated peer', async () => {
     const { transports, messages, joinAll } = setupHub(4);
     await joinAll();

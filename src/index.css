@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Short viewports (phones in landscape, ~360px tall): compact game layout. */
+@custom-variant short (@media (max-height: 480px));
+
 @layer base {
   *,
   *::before,
