@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import type { GameRules } from '../../engine/types';
 import type { PublicGameState } from '../../net/transport';
+import { LogoMark, Wordmark } from '../components/Logo';
 
 interface TableLobbyProps {
   state: PublicGameState;
@@ -38,8 +39,9 @@ export function TableLobby({ state, joinUrl, notice, onUpdateRules, onStartGame 
       <div className="flex flex-col min-h-full items-center justify-center gap-5 px-6 py-6">
         {/* Title */}
         <div className="text-center">
-          <h1 className="text-4xl font-bold text-white" style={{ fontFamily: "'Playfair Display', serif" }}>
-            ♠ Lakdi Table
+          <h1 className="text-4xl flex items-center justify-center gap-3">
+            <LogoMark size={48} />
+            <Wordmark />
           </h1>
           <p className="text-white/50 text-sm mt-1">Call Break · {filledCount}/4 players joined</p>
         </div>

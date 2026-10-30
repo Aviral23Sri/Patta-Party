@@ -219,7 +219,7 @@ describe('room codes', () => {
   });
 
   it('builds peer ids and join urls', () => {
-    expect(roomCodeToPeerId('ABCD')).toBe('lakdi-ABCD');
+    expect(roomCodeToPeerId('ABCD')).toBe('pattaparty-ABCD');
     expect(buildJoinUrl('http://192.168.1.5:5173', 'ABCD')).toBe('http://192.168.1.5:5173/?room=ABCD');
   });
 });

@@ -1,0 +1,62 @@
+/**
+ * Patta Party brand: the logo mark (fanned cards + confetti, same artwork as
+ * public/favicon.svg) and the wordmark.
+ */
+import { useId } from 'react';
+
+export const APP_NAME = 'Patta Party';
+export const APP_TAGLINE = 'Call Break for one table and four phones';
+
+export function LogoMark({ size = 64, className = '' }: { size?: number; className?: string }) {
+  // Unique gradient id: several marks can be on screen at once.
+  const gradientId = `pp-back-${useId().replace(/:/g, '')}`;
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      width={size}
+      height={size}
+      className={className}
+      role="img"
+      aria-label={APP_NAME}
+    >
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#fbbf24" />
+          <stop offset="1" stopColor="#d97706" />
+        </linearGradient>
+      </defs>
+      <rect width="64" height="64" rx="14" fill="#0b1120" />
+      {/* confetti */}
+      <circle cx="51" cy="11" r="2.6" fill="#f472b6" />
+      <circle cx="11" cy="13" r="2" fill="#fbbf24" />
+      <rect x="7" y="47" width="4.5" height="4.5" rx="1" fill="#34d399" transform="rotate(20 9.25 49.25)" />
+      <path d="M53 46 l4.5 2.2 -3.6 3.4 z" fill="#60a5fa" />
+      <circle cx="45" cy="57" r="1.6" fill="#f472b6" />
+      <circle cx="19" cy="6.5" r="1.3" fill="#34d399" />
+      {/* card back */}
+      <g transform="rotate(-16 32 36)">
+        <rect x="13" y="15" width="25" height="35" rx="4" fill={`url(#${gradientId})`} />
+        <rect x="16" y="18" width="19" height="29" rx="2.5" fill="none" stroke="#fef3c7" strokeOpacity=".7" strokeWidth="1.2" />
+      </g>
+      {/* card front with spade */}
+      <g transform="rotate(11 32 36)">
+        <rect x="25" y="15" width="25" height="35" rx="4" fill="#ffffff" />
+        <path
+          transform="translate(37.5 32.5) scale(.82)"
+          d="M0-11C-2.2-6.6-9.8-2.4-9.8 3.2c0 4.3 4.3 6.6 7.6 4.2-.5 2.7-1.6 4.4-3.3 5.6h11c-1.7-1.2-2.8-2.9-3.3-5.6 3.3 2.4 7.6.1 7.6-4.2C9.8-2.4 2.2-6.6 0-11z"
+          fill="#0f172a"
+        />
+      </g>
+    </svg>
+  );
+}
+
+/** "Patta Party" with "Party" in gold. Size it with a text-* class. */
+export function Wordmark({ className = '' }: { className?: string }) {
+  return (
+    <span className={`font-black tracking-tight ${className}`} style={{ fontFamily: "'Playfair Display', serif" }}>
+      <span className="text-white">Patta</span>{' '}
+      <span className="bg-gradient-to-r from-amber-300 to-amber-500 bg-clip-text text-transparent">Party</span>
+    </span>
+  );
+}

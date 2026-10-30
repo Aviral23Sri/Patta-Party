@@ -2,7 +2,7 @@
  * PlayerPage – route `/play` on a phone.
  *
  * 1. Shows the join form (room code prefilled from `?room=CODE`).
- * 2. On submit, opens a PeerClientTransport to `lakdi-CODE` and hands it to
+ * 2. On submit, opens a PeerClientTransport to `pattaparty-CODE` and hands it to
  *    PlayerView, which sends JOIN once the link is up.
  * 3. After a refresh, the tab's saved name + seat token for that room skip the form
  *    and reconnect straight into the same seat.
@@ -13,9 +13,9 @@ import { PlayerView } from './PlayerView';
 import { PeerClientTransport } from '../../net/peerClientTransport';
 import { normalizeRoomCode } from '../../net/roomCode';
 
-const tokenKey = (room: string) => `lakdi_token_${room}`;
-const nameKey = (room: string) => `lakdi_name_${room}`;
-const LAST_NAME_KEY = 'lakdi_last_name';
+const tokenKey = (room: string) => `pattaparty_token_${room}`;
+const nameKey = (room: string) => `pattaparty_name_${room}`;
+const LAST_NAME_KEY = 'pattaparty_last_name';
 
 // Seat identity (name + token) is per *tab* (sessionStorage): it survives a
 // refresh, while several tabs on one machine can still be separate players.

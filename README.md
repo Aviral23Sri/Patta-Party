@@ -1,6 +1,11 @@
-# ♠ Lakdi Table
+<p align="center"><img src="public/favicon.svg" width="96" alt="Patta Party logo" /></p>
 
-A local-multiplayer web app for the Indian card game **Call Break (Lakdi)**.  
+# Patta Party
+
+**Call Break for one table and four phones.**
+
+A local-multiplayer web app for the Indian card game **Call Break** (also called *Lakdi*; failing
+your bid is a "lakdi").  
 4 players use their phones as hands; a 5th device placed in the middle acts as the shared table.  
 Devices talk directly to each other over WebRTC (PeerJS). There is no game server.
 
@@ -116,7 +121,7 @@ a public port is reachable by anyone who has the link.
             HostController = single source of truth
 ```
 
-- **Room code → peer ID.** The table registers `lakdi-<CODE>` on the PeerJS server. Codes are 4
+- **Room code → peer ID.** The table registers `pattaparty-<CODE>` on the PeerJS server. Codes are 4
   characters from an alphabet without `0/O/1/I/L`. If the ID is taken, it retries with a new code.
 - **Transports are swappable.** `PeerHostTransport` / `PeerClientTransport` implement the
   same `HostTransport` / `ClientTransport` interfaces as the in-memory `LocalHub`, and contain no

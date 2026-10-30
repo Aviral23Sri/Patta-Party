@@ -1,7 +1,7 @@
 /**
  * TableHostPage – route `/table`: the shared Table device hosts the game.
  *
- * Reserves a room code on the PeerJS server (`lakdi-CODE`), wires a
+ * Reserves a room code on the PeerJS server (`pattaparty-CODE`), wires a
  * HostController to the WebRTC transport, keeps the screen awake, and tells
  * phones the host is gone when the page closes.
  */

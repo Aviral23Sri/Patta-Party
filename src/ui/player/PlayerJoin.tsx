@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { MAX_NAME_LENGTH } from '../../net/protocol';
 import { normalizeRoomCode, ROOM_CODE_LENGTH } from '../../net/roomCode';
+import { LogoMark, Wordmark } from '../components/Logo';
 
 interface PlayerJoinProps {
   defaultName?: string;
@@ -51,11 +52,11 @@ export function PlayerJoin({
         animate={{ opacity: 1, y: 0 }}
         className="text-center mb-6"
       >
-        <div className="text-5xl mb-2">♠</div>
-        <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "'Playfair Display', serif" }}>
-          Lakdi Table
+        <LogoMark size={64} className="mx-auto mb-3 short:hidden" />
+        <h1 className="text-3xl">
+          <Wordmark />
         </h1>
-        <p className="text-white/40 text-sm mt-1">Call Break · Join a table</p>
+        <p className="text-white/40 text-sm mt-1">Join the table · Call Break</p>
       </motion.div>
 
       {/* Form */}

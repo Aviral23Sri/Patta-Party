@@ -9,7 +9,7 @@ export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const ROOM_CODE_LENGTH = 4;
 
 /** Prefix keeps our IDs from colliding with other apps on the public PeerJS server. */
-export const PEER_ID_PREFIX = 'lakdi-';
+export const PEER_ID_PREFIX = 'pattaparty-';
 
 export function generateRoomCode(rand: () => number = Math.random): string {
   let code = '';

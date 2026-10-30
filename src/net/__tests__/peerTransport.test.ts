@@ -53,15 +53,15 @@ async function rawConnection(hostRoom: string): Promise<MockConn> {
 // ─── Room codes ───────────────────────────────────────────────────────────────
 
 describe('PeerHostTransport.create', () => {
-  it('registers lakdi-<CODE> as its peer id', async () => {
+  it('registers pattaparty-<CODE> as its peer id', async () => {
     const host = await createHost({ generateCode: () => 'ABCD' });
     expect(host.roomCode).toBe('ABCD');
-    expect(net.peers.has('lakdi-ABCD')).toBe(true);
+    expect(net.peers.has('pattaparty-ABCD')).toBe(true);
     host.destroy();
   });
 
   it('retries with a new code when the id is taken', async () => {
-    net.takenIds.add('lakdi-AAAA');
+    net.takenIds.add('pattaparty-AAAA');
     const codes = ['AAAA', 'BBBB'];
     const host = await createHost({ generateCode: () => codes.shift()! });
     expect(host.roomCode).toBe('BBBB');
@@ -69,7 +69,7 @@ describe('PeerHostTransport.create', () => {
   });
 
   it('gives up after maxCodeAttempts', async () => {
-    net.takenIds.add('lakdi-AAAA');
+    net.takenIds.add('pattaparty-AAAA');
     const p = PeerHostTransport.create(hostOptions({ generateCode: () => 'AAAA', maxCodeAttempts: 3 }));
     const assertion = expect(p).rejects.toBeInstanceOf(RoomCodeUnavailableError);
     await tick(50);
@@ -228,7 +228,7 @@ describe('PeerClientTransport lifecycle', () => {
     const { client, statuses } = connectClient('ROOM');
     await tick(50);
 
-    net.crash('lakdi-ROOM');
+    net.crash('pattaparty-ROOM');
     await tick(60_000);
     expect(statuses).toContain('reconnecting');
     expect(statuses.at(-1)).toBe('host_lost');
@@ -240,7 +240,7 @@ describe('PeerClientTransport lifecycle', () => {
     const host = await createHost({ generateCode: () => 'ROOM' });
     const { client, statuses } = connectClient('ROOM');
     await tick(50);
-    net.crash('lakdi-ROOM');
+    net.crash('pattaparty-ROOM');
     await tick(60_000);
     expect(statuses.at(-1)).toBe('host_lost');
 

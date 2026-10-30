@@ -1,7 +1,7 @@
 /**
  * PeerClientTransport – a phone's side of the WebRTC network.
  *
- * Owns one PeerJS peer and one data connection to `lakdi-<ROOM>`. If the
+ * Owns one PeerJS peer and one data connection to `pattaparty-<ROOM>`. If the
  * link drops (connection closed, heartbeat silence, phone slept) it retries
  * with backoff and reports `reconnecting`; the UI re-sends JOIN with its seat
  * token once the status is `connected` again. No game logic lives here.

@@ -16,6 +16,7 @@ import { motion } from 'framer-motion';
 import { DevSimulator } from './ui/dev/DevSimulator';
 import { TableHostPage } from './ui/table/TableHostPage';
 import { PlayerPage } from './ui/player/PlayerPage';
+import { APP_TAGLINE, LogoMark, Wordmark } from './ui/components/Logo';
 
 // ─── Simple router ────────────────────────────────────────────────────────────
 
@@ -70,12 +71,11 @@ export default function App() {
         transition={{ type: 'spring', stiffness: 200 }}
         className="mb-10"
       >
-        <div className="text-7xl mb-4 select-none">♠</div>
-        <h1 className="text-4xl font-black text-white mb-2"
-          style={{ fontFamily: "'Playfair Display', serif" }}>
-          Lakdi Table
+        <LogoMark size={104} className="mx-auto mb-5 drop-shadow-2xl" />
+        <h1 className="text-5xl mb-2">
+          <Wordmark />
         </h1>
-        <p className="text-white/40 text-sm">Local multiplayer Call Break · 4 phones + 1 table</p>
+        <p className="text-white/50 text-sm">{APP_TAGLINE}</p>
       </motion.div>
 
       {/* Action buttons */}
